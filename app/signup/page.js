@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../lib/supabaseClient";
+import GoogleSignInButton from "../GoogleSignInButton";
 
 export default function SignupPage() {
   const router = useRouter();
@@ -64,6 +65,12 @@ export default function SignupPage() {
   return (
     <div className="max-w-sm mx-auto">
       <h1 className="text-xl font-black uppercase mb-4">Create your account</h1>
+      <GoogleSignInButton />
+      <div className="flex items-center gap-3 my-4">
+        <div className="h-px bg-turfline flex-1" />
+        <span className="text-xs text-chalk/40">or</span>
+        <div className="h-px bg-turfline flex-1" />
+      </div>
       <form onSubmit={handleSignup} className="grid gap-3">
         <div>
           <label className="text-xs text-chalk/60">Name</label>

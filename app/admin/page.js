@@ -134,14 +134,35 @@ function GamesTab() {
     setGames((prev) => [...prev, data]);
   };
 
+  // Prefers deriving the target week's date window from Week 1's actual
+  // loaded games (earliest game_date + 7 days per week) rather than trusting
+  // the manually-typed kickoff field every time -- that field only matters
+  // for bootstrapping before Week 1 has any games in it yet.
+  const getWeekStartDate = async (week) => {
+    const { data: week1Games } = await supabase
+      .from("games")
+      .select("game_date")
+      .eq("week", 1)
+      .not("game_date", "is", null);
+
+    let base;
+    if (week1Games && week1Games.length > 0) {
+      const earliest = week1Games.map((g) => g.game_date).sort()[0];
+      const [y, m, d] = earliest.split("-").map(Number);
+      base = new Date(Date.UTC(y, m - 1, d));
+    } else {
+      base = new Date(kickoffDate + "T00:00:00Z");
+    }
+    base.setUTCDate(base.getUTCDate() + (week - 1) * 7);
+    return base.toISOString().slice(0, 10);
+  };
+
   const fetchSchedule = async () => {
     setScheduleLoading(true);
     setScheduleError("");
     setScheduleGames([]);
     try {
-      const base = new Date(kickoffDate + "T00:00:00Z");
-      base.setUTCDate(base.getUTCDate() + (editWeek - 1) * 7);
-      const startStr = base.toISOString().slice(0, 10);
+      const startStr = await getWeekStartDate(editWeek);
       const res = await fetch(`/api/schedule?start=${startStr}&days=8`);
       const json = await res.json();
       if (json.error) {
@@ -170,9 +191,7 @@ function GamesTab() {
     setResultsError("");
     setResultsMessage("");
     try {
-      const base = new Date(kickoffDate + "T00:00:00Z");
-      base.setUTCDate(base.getUTCDate() + (editWeek - 1) * 7);
-      const startStr = base.toISOString().slice(0, 10);
+      const startStr = await getWeekStartDate(editWeek);
       const res = await fetch(`/api/schedule?start=${startStr}&days=8`);
       const json = await res.json();
       if (json.error) {
@@ -378,7 +397,7 @@ function GamesTab() {
         </p>
         <div className="flex gap-3 flex-wrap items-center mb-3">
           <label className="text-xs flex items-center gap-2">
-            Week 1 kickoff date
+            Week 1 kickoff date (only used until Week 1 has games loaded)
             <input
               type="date"
               value={kickoffDate}
