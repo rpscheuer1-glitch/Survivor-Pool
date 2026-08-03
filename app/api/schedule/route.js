@@ -51,11 +51,34 @@ export async function GET(request) {
         const home = competitors.find((c) => c.homeAway === "home");
         const away = competitors.find((c) => c.homeAway === "away");
         const rawDate = comp?.date || event.date || "";
+        const completed = !!comp?.status?.type?.completed;
+        const winnerCompetitor = completed ? competitors.find((c) => c.winner === true) : null;
+
+        // Odds, if ESPN has posted a line yet (usually only within a week or so of
+        // kickoff). We don't trust the raw sign of odds.spread -- instead we derive
+        // magnitude and figure out which side is favored from the boolean flags,
+        // then convert to our own convention: negative = home favored.
+        const odds = comp?.odds?.[0];
+        let spread = null;
+        if (odds && odds.spread != null) {
+          const magnitude = Math.abs(Number(odds.spread));
+          const homeFavored = !!odds.homeTeamOdds?.favorite;
+          const awayFavored = !!odds.awayTeamOdds?.favorite;
+          if (magnitude > 0 && (homeFavored || awayFavored)) {
+            spread = homeFavored ? -magnitude : magnitude;
+          } else if (magnitude === 0) {
+            spread = 0; // pick 'em
+          }
+        }
+
         return {
           home: home?.team?.displayName || "",
           away: away?.team?.displayName || "",
           date: rawDate,
           game_date: rawDate ? toEasternDateString(rawDate) : null,
+          completed,
+          winner: winnerCompetitor?.team?.displayName || null,
+          spread, // null if ESPN doesn't have a line posted yet
         };
       })
       .filter((g) => g.home && g.away);

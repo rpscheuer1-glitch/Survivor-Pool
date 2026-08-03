@@ -66,6 +66,10 @@ function GamesTab() {
   const [scheduleLoading, setScheduleLoading] = useState(false);
   const [scheduleError, setScheduleError] = useState("");
 
+  const [resultsLoading, setResultsLoading] = useState(false);
+  const [resultsMessage, setResultsMessage] = useState("");
+  const [resultsError, setResultsError] = useState("");
+
   const [lockInBusy, setLockInBusy] = useState(false);
   const [lockInResult, setLockInResult] = useState(null);
   const [lockInError, setLockInError] = useState("");
@@ -159,6 +163,56 @@ function GamesTab() {
       )
     );
     setScheduleGames([]);
+  };
+
+  const fetchResultsAndOdds = async () => {
+    setResultsLoading(true);
+    setResultsError("");
+    setResultsMessage("");
+    try {
+      const base = new Date(kickoffDate + "T00:00:00Z");
+      base.setUTCDate(base.getUTCDate() + (editWeek - 1) * 7);
+      const startStr = base.toISOString().slice(0, 10);
+      const res = await fetch(`/api/schedule?start=${startStr}&days=8`);
+      const json = await res.json();
+      if (json.error) {
+        setResultsError(json.error);
+        setResultsLoading(false);
+        return;
+      }
+
+      let winnersSet = 0;
+      let spreadsUpdated = 0;
+
+      for (const g of games) {
+        const match = (json.games || []).find(
+          (m) => m.home === g.home && m.away === g.away
+        );
+        if (!match) continue;
+
+        const patch = {};
+        if (!g.winner && match.completed && match.winner) {
+          patch.winner = match.winner;
+        }
+        if (match.spread != null && Number(match.spread) !== Number(g.spread)) {
+          patch.spread = match.spread;
+        }
+        if (Object.keys(patch).length > 0) {
+          await updateGame(g.id, patch);
+          if (patch.winner) winnersSet += 1;
+          if (patch.spread != null) spreadsUpdated += 1;
+        }
+      }
+
+      setResultsMessage(
+        winnersSet === 0 && spreadsUpdated === 0
+          ? "No updates — either nothing's changed, or ESPN doesn't have this week's lines/results posted yet."
+          : `Updated ${spreadsUpdated} spread(s) and filled in ${winnersSet} winner(s).`
+      );
+    } catch (e) {
+      setResultsError("Couldn't reach the schedule service: " + e.message);
+    }
+    setResultsLoading(false);
   };
 
   const updateGame = async (id, patch) => {
@@ -374,6 +428,17 @@ function GamesTab() {
         <p className="text-xs text-chalk/50 mb-3">
           {ruleLabel(editWeek)} Marking a week final locks in results: a losing pick eliminates an entry, and a missing pick first tries last week's team (if it's still an option), then the biggest favorite this week — only eliminating if neither is available.
         </p>
+
+        <div className="flex items-center gap-3 flex-wrap mb-4">
+          <button className="btn-ghost" onClick={fetchResultsAndOdds} disabled={resultsLoading || games.length === 0}>
+            {resultsLoading ? "Checking…" : "Sync results & odds from ESPN"}
+          </button>
+          <span className="text-xs text-chalk/50">
+            Fills in winners for finished games and refreshes spreads for existing games in this week — only for games already added below.
+          </span>
+        </div>
+        {resultsError && <p className="text-rust text-sm mb-3">{resultsError}</p>}
+        {resultsMessage && <p className="text-leaf text-sm mb-3">{resultsMessage}</p>}
 
         <div className="border border-turfline rounded-lg p-4 mb-4">
           <div className="flex items-center gap-3 flex-wrap">
