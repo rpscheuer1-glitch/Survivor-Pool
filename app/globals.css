@@ -1,0 +1,58 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body {
+  background-color: #1F2A35;
+  color: #EDEFF2;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+input, select, textarea {
+  background: rgba(237,239,242,0.06);
+  border: 1px solid #3A4756;
+  color: #EDEFF2;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 14px;
+}
+
+.btn-primary {
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  font-size: 13px;
+  padding: 9px 16px;
+  border-radius: 6px;
+  background: #F2661A;
+  color: #141B22;
+  cursor: pointer;
+}
+
+.btn-ghost {
+  font-weight: 700;
+  font-size: 12px;
+  padding: 7px 12px;
+  border-radius: 6px;
+  border: 1px solid #3A4756;
+  background: transparent;
+  color: #EDEFF2;
+  cursor: pointer;
+}
+
+.pill {
+  font-weight: 700;
+  font-size: 12px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.pill-green { background: rgba(63,166,108,0.16); color: #3FA66C; }
+.pill-red { background: rgba(214,69,58,0.16); color: #D6453A; }
+.pill-amber { background: rgba(242,102,26,0.18); color: #9c4415; }
+.pill-gray { background: rgba(150,165,180,0.16); color: #8695a6; }
+
+select option {
+  color: #141B22;
+  background: #EDEFF2;
+}

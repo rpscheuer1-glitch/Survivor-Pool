@@ -1,0 +1,6 @@
+{
+  "crons": [
+    { "path": "/api/cron/remind-missing-picks", "schedule": "0 15 * 9,10 6" },
+    { "path": "/api/cron/remind-missing-picks", "schedule": "0 16 * 11,12,1,2 6" }
+  ]
+}
