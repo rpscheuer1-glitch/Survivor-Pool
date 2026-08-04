@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabaseClient";
-import { computeStatus } from "../../lib/poolLogic";
+import { computeStatus, isLocked } from "../../lib/poolLogic";
 import { abbr } from "../../lib/teams";
 
 function Pill({ tone = "gray", children }) {
@@ -49,18 +49,27 @@ export default function Standings() {
           (s) => s.status.eliminatedWeek === null || s.status.eliminatedWeek >= wk
         );
 
+        const games = gamesByWeek[wk] || [];
         const tally = {};
         let noPick = 0;
+        let hiddenCount = 0;
         remainingEntries.forEach((s) => {
           const pick = s.status.detail[wk]?.pick;
           if (!pick) {
             noPick += 1;
             return;
           }
+          const game = games.find((g) => g.home === pick || g.away === pick);
+          // Don't reveal who someone picked until that specific game has
+          // actually locked -- otherwise people could see the crowd's picks
+          // and copy them before their own deadline passes.
+          if (game && !isLocked(game)) {
+            hiddenCount += 1;
+            return;
+          }
           tally[pick] = (tally[pick] || 0) + 1;
         });
 
-        const games = gamesByWeek[wk] || [];
         const rows = Object.entries(tally)
           .map(([team, count]) => {
             const game = games.find((g) => g.home === team || g.away === team);
@@ -70,7 +79,7 @@ export default function Standings() {
           })
           .sort((a, b) => b.count - a.count);
 
-        return { week: wk, remaining: remainingEntries.length, rows, noPick, isFinal: !!finalByWeek[wk] };
+        return { week: wk, remaining: remainingEntries.length, rows, noPick, hiddenCount, isFinal: !!finalByWeek[wk] };
       });
 
       setWeekly(weekly);
@@ -137,6 +146,16 @@ export default function Standings() {
                   </div>
                 );
               })}
+              {w.hiddenCount > 0 && (
+                <div className="flex items-center gap-3 text-sm border-t border-turfline pt-2 mt-1">
+                  <span className="w-11 flex-shrink-0" />
+                  <span className="w-40 flex-shrink-0 text-chalk/50 italic">Not revealed yet</span>
+                  <div className="flex-1" />
+                  <span className="w-16 flex-shrink-0" />
+                  <span className="w-10 text-right text-xs text-chalk/60 flex-shrink-0">{w.hiddenCount}</span>
+                  <span className="w-20 flex-shrink-0 text-right"><Pill tone="gray">Locked soon</Pill></span>
+                </div>
+              )}
               {w.noPick > 0 && (
                 <div className="flex items-center gap-3 text-sm border-t border-turfline pt-2 mt-1">
                   <span className="w-11 flex-shrink-0" />
@@ -147,7 +166,7 @@ export default function Standings() {
                   <span className="w-20 flex-shrink-0 text-right"><Pill tone="red">Eliminated</Pill></span>
                 </div>
               )}
-              {w.rows.length === 0 && w.noPick === 0 && (
+              {w.rows.length === 0 && w.noPick === 0 && w.hiddenCount === 0 && (
                 <p className="text-chalk/50 text-sm">No picks submitted yet.</p>
               )}
             </div>
