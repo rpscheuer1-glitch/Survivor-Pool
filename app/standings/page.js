@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabaseClient";
-import { computeStatus, isLocked } from "../../lib/poolLogic";
+import { computeStatus, isLocked, computeAutoCurrentWeek } from "../../lib/poolLogic";
 import { abbr } from "../../lib/teams";
 
 function Pill({ tone = "gray", children }) {
@@ -52,7 +52,6 @@ export default function Standings() {
         const games = gamesByWeek[wk] || [];
         const tally = {};
         let noPick = 0;
-        let hiddenCount = 0;
         remainingEntries.forEach((s) => {
           const pick = s.status.detail[wk]?.pick;
           if (!pick) {
@@ -60,11 +59,12 @@ export default function Standings() {
             return;
           }
           const game = games.find((g) => g.home === pick || g.away === pick);
-          // Don't reveal who someone picked until that specific game has
-          // actually locked -- otherwise people could see the crowd's picks
-          // and copy them before their own deadline passes.
+          // Don't reveal who someone picked -- or even a count of how many
+          // haven't been revealed -- until that specific game has actually
+          // locked. Showing a bare number next to an obvious favorite still
+          // tells people almost everything, so unrevealed picks leave no
+          // trace at all until their game locks.
           if (game && !isLocked(game)) {
-            hiddenCount += 1;
             return;
           }
           tally[pick] = (tally[pick] || 0) + 1;
@@ -79,8 +79,8 @@ export default function Standings() {
           })
           .sort((a, b) => b.count - a.count);
 
-        return { week: wk, remaining: remainingEntries.length, rows, noPick, hiddenCount, isFinal: !!finalByWeek[wk] };
-      });
+        return { week: wk, remaining: remainingEntries.length, rows, noPick, isFinal: !!finalByWeek[wk] };
+      }).filter((w) => w.week <= computeAutoCurrentWeek(gamesByWeek));
 
       setWeekly(weekly);
       setTotalEntries((entries || []).length);
@@ -146,16 +146,6 @@ export default function Standings() {
                   </div>
                 );
               })}
-              {w.hiddenCount > 0 && (
-                <div className="flex items-center gap-3 text-sm border-t border-turfline pt-2 mt-1">
-                  <span className="w-11 flex-shrink-0" />
-                  <span className="w-40 flex-shrink-0 text-chalk/50 italic">Not revealed yet</span>
-                  <div className="flex-1" />
-                  <span className="w-16 flex-shrink-0" />
-                  <span className="w-10 text-right text-xs text-chalk/60 flex-shrink-0">{w.hiddenCount}</span>
-                  <span className="w-20 flex-shrink-0 text-right"><Pill tone="gray">Locked soon</Pill></span>
-                </div>
-              )}
               {w.noPick > 0 && (
                 <div className="flex items-center gap-3 text-sm border-t border-turfline pt-2 mt-1">
                   <span className="w-11 flex-shrink-0" />
@@ -166,7 +156,7 @@ export default function Standings() {
                   <span className="w-20 flex-shrink-0 text-right"><Pill tone="red">Eliminated</Pill></span>
                 </div>
               )}
-              {w.rows.length === 0 && w.noPick === 0 && w.hiddenCount === 0 && (
+              {w.rows.length === 0 && w.noPick === 0 && (
                 <p className="text-chalk/50 text-sm">No picks submitted yet.</p>
               )}
             </div>

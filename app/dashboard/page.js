@@ -110,6 +110,19 @@ export default function Dashboard() {
     }));
   };
 
+  const clearPick = async (entryId, week) => {
+    const { error: pickErr } = await supabase.from("picks").delete().eq("entry_id", entryId).eq("week", week);
+    if (pickErr) {
+      setError(pickErr.message);
+      return;
+    }
+    setPicksByEntry((prev) => {
+      const entryPicks = { ...(prev[entryId] || {}) };
+      delete entryPicks[week];
+      return { ...prev, [entryId]: entryPicks };
+    });
+  };
+
   if (authLoading || loadingData) return <p className="text-chalk/60">Loading…</p>;
 
   const selectedEntry = entries.find((e) => e.id === selectedEntryId);
@@ -205,6 +218,7 @@ export default function Dashboard() {
           currentWeek={currentWeek}
           weekNums={weekNums}
           submitPick={submitPick}
+          clearPick={clearPick}
           onBack={() => setSelectedEntryId(null)}
         />
       )}
@@ -212,7 +226,7 @@ export default function Dashboard() {
   );
 }
 
-function EntryDetail({ entry, picks, gamesByWeek, finalByWeek, currentWeek, weekNums, submitPick, onBack }) {
+function EntryDetail({ entry, picks, gamesByWeek, finalByWeek, currentWeek, weekNums, submitPick, clearPick, onBack }) {
   const status = computeStatus(picks, gamesByWeek, finalByWeek);
   const openWeeks = weekNums.filter((wk) => wk >= currentWeek && !finalByWeek[wk] && (gamesByWeek[wk] || []).length > 0);
 
@@ -231,6 +245,15 @@ function EntryDetail({ entry, picks, gamesByWeek, finalByWeek, currentWeek, week
     await submitPick(entry.id, wk, team);
     setJustSavedWeek(wk);
     setTimeout(() => setJustSavedWeek(null), 1500);
+  };
+
+  const handleClear = async (wk) => {
+    await clearPick(entry.id, wk);
+    setStagedPicks((prev) => {
+      const next = { ...prev };
+      delete next[wk];
+      return next;
+    });
   };
 
   return (
@@ -343,6 +366,14 @@ function EntryDetail({ entry, picks, gamesByWeek, finalByWeek, currentWeek, week
                   >
                     {submittedPick ? "Update pick" : "Submit pick"}
                   </button>
+                  {submittedPick && (
+                    <button
+                      className="btn-ghost text-rust border-rust"
+                      onClick={() => handleClear(wk)}
+                    >
+                      Clear pick
+                    </button>
+                  )}
                   {justSavedWeek === wk && <span className="text-leaf text-sm">Saved.</span>}
                   {stagedPick && stagedPick !== submittedPick && justSavedWeek !== wk && (
                     <span className="text-xs text-chalk/50">Not saved yet — click to confirm.</span>
