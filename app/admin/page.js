@@ -485,12 +485,36 @@ function GamesTab() {
               <option value="saturday">Saturday</option>
               <option value="sunday">Sunday</option>
             </select>
-            <input
-              type="time"
-              value={weekendLockTime}
-              onChange={(e) => saveLockSettings(weekendLockDay, e.target.value)}
-              className="w-32"
-            />
+            {(() => {
+              const [h, m] = weekendLockTime.split(":").map(Number);
+              const hour12 = h % 12 === 0 ? 12 : h % 12;
+              const ampm = h >= 12 ? "PM" : "AM";
+              const updateTime = (newHour12, newMinute, newAmpm) => {
+                let hour24 = newHour12 % 12;
+                if (newAmpm === "PM") hour24 += 12;
+                const hh = String(hour24).padStart(2, "0");
+                const mm = String(newMinute).padStart(2, "0");
+                saveLockSettings(weekendLockDay, `${hh}:${mm}`);
+              };
+              return (
+                <>
+                  <select value={hour12} onChange={(e) => updateTime(Number(e.target.value), m, ampm)} className="w-20">
+                    {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => (
+                      <option key={n} value={n}>{n}</option>
+                    ))}
+                  </select>
+                  <select value={String(m).padStart(2, "0")} onChange={(e) => updateTime(hour12, Number(e.target.value), ampm)} className="w-20">
+                    {["00", "15", "30", "45"].map((mm) => (
+                      <option key={mm} value={mm}>:{mm}</option>
+                    ))}
+                  </select>
+                  <select value={ampm} onChange={(e) => updateTime(hour12, m, e.target.value)} className="w-20">
+                    <option value="AM">AM</option>
+                    <option value="PM">PM</option>
+                  </select>
+                </>
+              );
+            })()}
             <span className="text-xs text-chalk/50">Central time</span>
             {lockSettingsSaved && <span className="text-leaf text-xs">Saved</span>}
           </div>
