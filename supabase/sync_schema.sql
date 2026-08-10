@@ -56,8 +56,12 @@ alter table pool_settings add column if not exists signups_locked boolean not nu
 -- Weeks: whether a given week's results are finalized.
 create table if not exists weeks (
   week int primary key,
-  final boolean not null default false
+  final boolean not null default false,
+  weekend_lock_day text not null default 'sunday',
+  weekend_lock_time text not null default '10:00'
 );
+alter table weeks add column if not exists weekend_lock_day text not null default 'sunday';
+alter table weeks add column if not exists weekend_lock_time text not null default '10:00';
 
 -- Games: one row per matchup per week.
 create table if not exists games (

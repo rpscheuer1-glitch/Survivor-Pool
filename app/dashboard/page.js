@@ -39,21 +39,27 @@ export default function Dashboard() {
       .order("created_at", { ascending: true });
     setEntries(entryRows || []);
 
+    const { data: weekRows } = await supabase.from("weeks").select("*");
+    const fbw = {};
+    const lockSettingsByWeek = {};
+    (weekRows || []).forEach((w) => {
+      fbw[w.week] = w.final;
+      lockSettingsByWeek[w.week] = { day: w.weekend_lock_day, time: w.weekend_lock_time };
+    });
+    setFinalByWeek(fbw);
+
     const { data: gameRows } = await supabase.from("games").select("*");
     const gbw = {};
     (gameRows || []).forEach((g) => {
+      const settings = lockSettingsByWeek[g.week] || {};
+      const enriched = { ...g, weekend_lock_day: settings.day, weekend_lock_time: settings.time };
       gbw[g.week] = gbw[g.week] || [];
-      gbw[g.week].push(g);
+      gbw[g.week].push(enriched);
     });
     Object.keys(gbw).forEach((wk) => {
       gbw[wk].sort((a, b) => (a.game_date || "9999-99-99").localeCompare(b.game_date || "9999-99-99"));
     });
     setGamesByWeek(gbw);
-
-    const { data: weekRows } = await supabase.from("weeks").select("*");
-    const fbw = {};
-    (weekRows || []).forEach((w) => (fbw[w.week] = w.final));
-    setFinalByWeek(fbw);
 
     if (entryRows && entryRows.length > 0) {
       const ids = entryRows.map((e) => e.id);

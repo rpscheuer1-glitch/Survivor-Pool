@@ -43,10 +43,14 @@ insert into pool_settings (id, pool_name, current_week)
   values (1, 'Survivor Pool', 1)
   on conflict (id) do nothing;
 
--- Weeks: whether a given week's results are finalized.
+-- Weeks: whether a given week's results are finalized, and when its Sat/Sun/Mon
+-- games lock (configurable per week -- e.g. Week 1 often needs a later deadline
+-- to account for late signups/payment).
 create table if not exists weeks (
   week int primary key,
-  final boolean not null default false
+  final boolean not null default false,
+  weekend_lock_day text not null default 'sunday',
+  weekend_lock_time text not null default '10:00'
 );
 
 -- Games: one row per matchup per week.

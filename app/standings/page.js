@@ -23,13 +23,19 @@ export default function Standings() {
       const { data: weekRows } = await supabase.from("weeks").select("*");
       const { data: pickRows } = await supabase.from("picks").select("*");
 
+      const finalByWeek = {};
+      const lockSettingsByWeek = {};
+      (weekRows || []).forEach((w) => {
+        finalByWeek[w.week] = w.final;
+        lockSettingsByWeek[w.week] = { day: w.weekend_lock_day, time: w.weekend_lock_time };
+      });
       const gamesByWeek = {};
       (gameRows || []).forEach((g) => {
+        const settings = lockSettingsByWeek[g.week] || {};
+        const enriched = { ...g, weekend_lock_day: settings.day, weekend_lock_time: settings.time };
         gamesByWeek[g.week] = gamesByWeek[g.week] || [];
-        gamesByWeek[g.week].push(g);
+        gamesByWeek[g.week].push(enriched);
       });
-      const finalByWeek = {};
-      (weekRows || []).forEach((w) => (finalByWeek[w.week] = w.final));
       const picksByEntry = {};
       (pickRows || []).forEach((p) => {
         picksByEntry[p.entry_id] = picksByEntry[p.entry_id] || {};

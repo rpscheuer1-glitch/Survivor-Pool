@@ -76,6 +76,10 @@ function GamesTab() {
 
   const [allGamesByWeek, setAllGamesByWeek] = useState({});
 
+  const [weekendLockDay, setWeekendLockDay] = useState("sunday");
+  const [weekendLockTime, setWeekendLockTime] = useState("10:00");
+  const [lockSettingsSaved, setLockSettingsSaved] = useState(false);
+
   const load = useCallback(async () => {
     setLoadingData(true);
     const { data: settingsRow } = await supabase.from("pool_settings").select("*").eq("id", 1).single();
@@ -98,10 +102,23 @@ function GamesTab() {
 
     const { data: weekRow } = await supabase.from("weeks").select("*").eq("week", editWeek).maybeSingle();
     setWeekFinal(weekRow?.final || false);
+    setWeekendLockDay(weekRow?.weekend_lock_day || "sunday");
+    setWeekendLockTime(weekRow?.weekend_lock_time || "10:00");
     setLoadingData(false);
   }, [editWeek]);
 
   useEffect(() => { load(); }, [load]);
+
+  const saveLockSettings = async (day, time) => {
+    const { error: upErr } = await supabase
+      .from("weeks")
+      .upsert({ week: editWeek, weekend_lock_day: day, weekend_lock_time: time }, { onConflict: "week" });
+    if (upErr) { setError(upErr.message); return; }
+    setWeekendLockDay(day);
+    setWeekendLockTime(time);
+    setLockSettingsSaved(true);
+    setTimeout(() => setLockSettingsSaved(false), 1500);
+  };
 
   const savePoolName = async () => {
     const { error: err } = await supabase.from("pool_settings").update({ pool_name: poolNameInput }).eq("id", 1);
@@ -264,13 +281,19 @@ function GamesTab() {
       const { data: allWeeks } = await supabase.from("weeks").select("*");
       const { data: allPicks } = await supabase.from("picks").select("*");
 
+      const finalByWeek = {};
+      const lockSettingsByWeek = {};
+      (allWeeks || []).forEach((w) => {
+        finalByWeek[w.week] = w.final;
+        lockSettingsByWeek[w.week] = { day: w.weekend_lock_day, time: w.weekend_lock_time };
+      });
       const gamesByWeek = {};
       (allGames || []).forEach((g) => {
+        const settings = lockSettingsByWeek[g.week] || {};
+        const enriched = { ...g, weekend_lock_day: settings.day, weekend_lock_time: settings.time };
         gamesByWeek[g.week] = gamesByWeek[g.week] || [];
-        gamesByWeek[g.week].push(g);
+        gamesByWeek[g.week].push(enriched);
       });
-      const finalByWeek = {};
-      (allWeeks || []).forEach((w) => (finalByWeek[w.week] = w.final));
 
       if (!weekFullyLocked(editWeek, gamesByWeek)) {
         const proceed = confirm(
@@ -447,6 +470,31 @@ function GamesTab() {
         <p className="text-xs text-chalk/50 mb-3">
           {ruleLabel(editWeek)} Marking a week final locks in results: a losing pick eliminates an entry, and a missing pick first tries last week's team (if it's still an option), then the biggest favorite this week — only eliminating if neither is available.
         </p>
+
+        <div className="border border-turfline rounded-lg p-4 mb-4">
+          <div className="text-sm font-bold mb-1">Weekend pick deadline for week {editWeek}</div>
+          <p className="text-xs text-chalk/50 mb-3">
+            When Sat/Sun/Mon games lock, all together. Wed/Thu/Fri games always lock 6:00 PM Central that same day, regardless of this setting.
+          </p>
+          <div className="flex items-center gap-3 flex-wrap">
+            <select
+              value={weekendLockDay}
+              onChange={(e) => saveLockSettings(e.target.value, weekendLockTime)}
+              className="w-36"
+            >
+              <option value="saturday">Saturday</option>
+              <option value="sunday">Sunday</option>
+            </select>
+            <input
+              type="time"
+              value={weekendLockTime}
+              onChange={(e) => saveLockSettings(weekendLockDay, e.target.value)}
+              className="w-32"
+            />
+            <span className="text-xs text-chalk/50">Central time</span>
+            {lockSettingsSaved && <span className="text-leaf text-xs">Saved</span>}
+          </div>
+        </div>
 
         <div className="flex items-center gap-3 flex-wrap mb-4">
           <button className="btn-ghost" onClick={fetchResultsAndOdds} disabled={resultsLoading || games.length === 0}>
@@ -637,10 +685,19 @@ function EmailTab() {
     const { data: weekRows } = await supabase.from("weeks").select("*");
     const { data: pickRows } = await supabase.from("picks").select("*");
 
-    const gamesByWeek = {};
-    (gameRows || []).forEach((g) => { gamesByWeek[g.week] = gamesByWeek[g.week] || []; gamesByWeek[g.week].push(g); });
     const finalByWeek = {};
-    (weekRows || []).forEach((w) => (finalByWeek[w.week] = w.final));
+    const lockSettingsByWeek = {};
+    (weekRows || []).forEach((w) => {
+      finalByWeek[w.week] = w.final;
+      lockSettingsByWeek[w.week] = { day: w.weekend_lock_day, time: w.weekend_lock_time };
+    });
+    const gamesByWeek = {};
+    (gameRows || []).forEach((g) => {
+      const settings = lockSettingsByWeek[g.week] || {};
+      const enriched = { ...g, weekend_lock_day: settings.day, weekend_lock_time: settings.time };
+      gamesByWeek[g.week] = gamesByWeek[g.week] || [];
+      gamesByWeek[g.week].push(enriched);
+    });
     const picksByEntry = {};
     (pickRows || []).forEach((p) => {
       picksByEntry[p.entry_id] = picksByEntry[p.entry_id] || {};
