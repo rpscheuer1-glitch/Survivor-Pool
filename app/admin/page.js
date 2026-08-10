@@ -3,7 +3,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../lib/supabaseClient";
 import { useAuth } from "../../lib/useAuth";
-import { ruleLabel, spreadLabel, computeStatus, computeFallbackPick, weekFullyLocked, computeAutoCurrentWeek } from "../../lib/poolLogic";
+import { ruleLabel, spreadLabel, computeStatus, computeFallbackPick, weekFullyLocked, computeAutoCurrentWeek, isLocked } from "../../lib/poolLogic";
 import { TEAMS } from "../../lib/teams";
 
 export default function AdminPage() {
@@ -885,8 +885,13 @@ function ManagePicksTab() {
     const { data: entryRows } = await supabase.from("entries").select("*").order("email");
     setEntries(entryRows || []);
 
+    const { data: weekRow } = await supabase.from("weeks").select("*").eq("week", week).maybeSingle();
+    const lockDay = weekRow?.weekend_lock_day || "sunday";
+    const lockTime = weekRow?.weekend_lock_time || "10:00";
+
     const { data: gameRows } = await supabase.from("games").select("*").eq("week", week);
-    setGames(gameRows || []);
+    const enrichedGames = (gameRows || []).map((g) => ({ ...g, weekend_lock_day: lockDay, weekend_lock_time: lockTime }));
+    setGames(enrichedGames);
 
     const ids = (entryRows || []).map((e) => e.id);
     if (ids.length > 0) {
@@ -943,6 +948,7 @@ function ManagePicksTab() {
     <div>
       <p className="text-xs text-chalk/50 mb-3">
         Sets a pick directly, bypassing normal lock/eligibility checks — use this for picks called or texted in after someone couldn't get to the site in time.
+        Existing picks stay hidden here too, even from you, until that specific game locks — you can still set a new pick for someone without seeing what's already there.
       </p>
       <div className="flex gap-3 flex-wrap items-center mb-4">
         <label className="text-xs flex items-center gap-2">
@@ -967,31 +973,44 @@ function ManagePicksTab() {
         <p className="text-chalk/60 text-sm">Loading…</p>
       ) : (
         <div className="grid gap-2">
-          {filtered.map((entry) => (
-            <div key={entry.id} className="border border-turfline rounded-lg p-3 flex items-center gap-3 flex-wrap">
-              <div className="flex-1 min-w-[200px]">
-                <div className="font-bold text-sm">{entry.label}</div>
-                <div className="text-xs text-chalk/50">{entry.email}</div>
+          {filtered.map((entry) => {
+            const pickInfo = picks[entry.id];
+            const pickedTeam = pickInfo?.team || null;
+            const game = pickedTeam ? games.find((g) => g.home === pickedTeam || g.away === pickedTeam) : null;
+            const revealed = !pickedTeam || !game || isLocked(game);
+            const displayValue = revealed ? pickedTeam || "" : "";
+
+            return (
+              <div key={entry.id} className="border border-turfline rounded-lg p-3 flex items-center gap-3 flex-wrap">
+                <div className="flex-1 min-w-[200px]">
+                  <div className="font-bold text-sm">{entry.label}</div>
+                  <div className="text-xs text-chalk/50">{entry.email}</div>
+                </div>
+                <select
+                  value={displayValue}
+                  onChange={(e) => setPickFor(entry.id, e.target.value)}
+                  className="w-56"
+                >
+                  <option value="">{pickedTeam && !revealed ? "— Hidden until game locks —" : "— No pick —"}</option>
+                  {teamOptions.map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
+                {pickedTeam && !revealed && (
+                  <span className="text-chalk/50 text-xs italic" title="This pick exists but stays hidden, even from admin, until that specific game locks.">
+                    Hidden until locked
+                  </span>
+                )}
+                {revealed && pickInfo?.auto && <span className="text-amber text-xs" title="Set by the lock-in tool, not the participant">(auto)</span>}
+                {savedIds[entry.id] && <span className="text-leaf text-xs">Saved</span>}
+                <button
+                  className="btn-ghost text-rust border-rust"
+                  onClick={() => deleteEntry(entry)}
+                  title="Removes this entry and all of its picks, every week"
+                >
+                  Delete entry
+                </button>
               </div>
-              <select
-                value={picks[entry.id]?.team || ""}
-                onChange={(e) => setPickFor(entry.id, e.target.value)}
-                className="w-56"
-              >
-                <option value="">— No pick —</option>
-                {teamOptions.map((t) => <option key={t} value={t}>{t}</option>)}
-              </select>
-              {picks[entry.id]?.auto && <span className="text-amber text-xs" title="Set by the lock-in tool, not the participant">(auto)</span>}
-              {savedIds[entry.id] && <span className="text-leaf text-xs">Saved</span>}
-              <button
-                className="btn-ghost text-rust border-rust"
-                onClick={() => deleteEntry(entry)}
-                title="Removes this entry and all of its picks, every week"
-              >
-                Delete entry
-              </button>
-            </div>
-          ))}
+            );
+          })}
           {filtered.length === 0 && <p className="text-chalk/50 text-sm">No matches.</p>}
         </div>
       )}
