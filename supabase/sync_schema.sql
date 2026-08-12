@@ -221,6 +221,10 @@ do $$ begin
 exception when duplicate_object then null; end $$;
 
 do $$ begin
+  create policy "entries: update own" on entries for update using (auth.uid() = user_id);
+exception when duplicate_object then null; end $$;
+
+do $$ begin
   create policy "entries: delete own" on entries for delete using (auth.uid() = user_id);
 exception when duplicate_object then null; end $$;
 

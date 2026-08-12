@@ -129,6 +129,17 @@ export default function Dashboard() {
     });
   };
 
+  const renameEntry = async (entryId, newLabel) => {
+    const label = newLabel.trim();
+    if (!label) return;
+    const { error: renameErr } = await supabase.from("entries").update({ label }).eq("id", entryId);
+    if (renameErr) {
+      setError(renameErr.message);
+      return;
+    }
+    setEntries((prev) => prev.map((e) => (e.id === entryId ? { ...e, label } : e)));
+  };
+
   if (authLoading || loadingData) return <p className="text-chalk/60">Loading…</p>;
 
   const selectedEntry = entries.find((e) => e.id === selectedEntryId);
@@ -225,6 +236,7 @@ export default function Dashboard() {
           weekNums={weekNums}
           submitPick={submitPick}
           clearPick={clearPick}
+          renameEntry={renameEntry}
           onBack={() => setSelectedEntryId(null)}
         />
       )}
@@ -232,13 +244,15 @@ export default function Dashboard() {
   );
 }
 
-function EntryDetail({ entry, picks, gamesByWeek, finalByWeek, currentWeek, weekNums, submitPick, clearPick, onBack }) {
+function EntryDetail({ entry, picks, gamesByWeek, finalByWeek, currentWeek, weekNums, submitPick, clearPick, renameEntry, onBack }) {
   const status = computeStatus(picks, gamesByWeek, finalByWeek);
   const openWeeks = weekNums.filter((wk) => wk >= currentWeek && !finalByWeek[wk] && (gamesByWeek[wk] || []).length > 0);
 
   const [stagedPicks, setStagedPicks] = useState({});
   const [justSavedWeek, setJustSavedWeek] = useState(null);
   const [selectedPickWeek, setSelectedPickWeek] = useState(null);
+  const [editingName, setEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState(entry.label);
 
   useEffect(() => {
     if (openWeeks.length > 0 && !openWeeks.includes(selectedPickWeek)) {
@@ -262,11 +276,32 @@ function EntryDetail({ entry, picks, gamesByWeek, finalByWeek, currentWeek, week
     });
   };
 
+  const handleSaveName = async () => {
+    await renameEntry(entry.id, nameInput);
+    setEditingName(false);
+  };
+
   return (
     <div>
       <button className="btn-ghost mb-4" onClick={onBack}>← Back to entries</button>
-      <div className="flex items-center gap-3 mb-6">
-        <span className="font-black uppercase text-lg">{entry.label}</span>
+      <div className="flex items-center gap-3 mb-6 flex-wrap">
+        {editingName ? (
+          <>
+            <input
+              value={nameInput}
+              onChange={(e) => setNameInput(e.target.value)}
+              className="w-48"
+              autoFocus
+            />
+            <button className="btn-primary" onClick={handleSaveName}>Save</button>
+            <button className="btn-ghost" onClick={() => { setNameInput(entry.label); setEditingName(false); }}>Cancel</button>
+          </>
+        ) : (
+          <>
+            <span className="font-black uppercase text-lg">{entry.label}</span>
+            <button className="btn-ghost" onClick={() => setEditingName(true)}>Rename</button>
+          </>
+        )}
         {status.eliminated ? (
           <Pill tone="red">Eliminated — {status.reason} (wk {status.eliminatedWeek})</Pill>
         ) : (

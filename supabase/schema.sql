@@ -174,6 +174,9 @@ create policy "games: admin delete" on games for delete using (
 alter table entries enable row level security;
 create policy "entries: read all" on entries for select using (true);
 create policy "entries: insert own" on entries for insert with check (auth.uid() = user_id);
+
+drop policy if exists "entries: update own" on entries;
+create policy "entries: update own" on entries for update using (auth.uid() = user_id);
 create policy "entries: delete own" on entries for delete using (auth.uid() = user_id);
 
 drop policy if exists "entries: admin delete" on entries;
