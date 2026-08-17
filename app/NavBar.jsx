@@ -24,6 +24,7 @@ export default function NavBar() {
         <span>{poolName}</span>
       </div>
       <div className="flex items-center gap-4 text-sm">
+        <Link href="/rules" className="hover:text-amber">Rules</Link>
         <Link href="/standings" className="hover:text-amber">Weekly Summary</Link>
         {user && <Link href="/dashboard" className="hover:text-amber">My Entries</Link>}
         {isAdmin && <Link href="/admin" className="hover:text-amber">Admin</Link>}

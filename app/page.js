@@ -36,6 +36,7 @@ export default function Home() {
               <Link href="/login" className="btn-ghost">Log in</Link>
             </>
           )}
+          <Link href="/rules" className="btn-ghost">View rules</Link>
           <Link href="/standings" className="btn-ghost">View weekly summary</Link>
         </div>
       )}
