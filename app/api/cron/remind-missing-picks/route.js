@@ -1,5 +1,5 @@
 import { supabase } from "../../../../lib/supabaseClient";
-import { computeStatus } from "../../../../lib/poolLogic";
+import { computeStatus, computeAutoCurrentWeek } from "../../../../lib/poolLogic";
 import { sendBulkEmail } from "../../../../lib/serverEmail";
 
 // Triggered by Vercel Cron (see vercel.json) — not meant to be called by a
@@ -11,10 +11,6 @@ export async function GET(request) {
   if (!process.env.CRON_SECRET || auth !== `Bearer ${process.env.CRON_SECRET}`) {
     return new Response("Unauthorized", { status: 401 });
   }
-
-  const { data: settingsRow } = await supabase.from("pool_settings").select("*").eq("id", 1).single();
-  const week = settingsRow?.current_week;
-  if (!week) return Response.json({ skipped: true, reason: "No current week set." });
 
   const { data: entries } = await supabase.from("entries").select("*");
   const { data: gameRows } = await supabase.from("games").select("*");
@@ -34,6 +30,17 @@ export async function GET(request) {
     gamesByWeek[g.week] = gamesByWeek[g.week] || [];
     gamesByWeek[g.week].push(enriched);
   });
+
+  if (Object.keys(gamesByWeek).length === 0) {
+    return Response.json({ skipped: true, reason: "No games loaded for any week yet." });
+  }
+
+  // Current week is fully automatic now, based on today's date and whichever
+  // weeks have games loaded -- same logic the dashboard and admin use, not
+  // the old manual pool_settings.current_week field (which nothing updates
+  // anymore since that switch).
+  const week = computeAutoCurrentWeek(gamesByWeek);
+
   const picksByEntry = {};
   (pickRows || []).forEach((p) => {
     picksByEntry[p.entry_id] = picksByEntry[p.entry_id] || {};

@@ -100,31 +100,37 @@ time-critical or frequent.
 5. Click **Deploy**. Vercel gives you a live URL
    (e.g. `survivor-pool.vercel.app`) you can share with your ~360 participants.
 
-## 8. Automatic Saturday reminder emails (only works once deployed)
+## 8. Automatic reminder emails (only works once deployed)
 
 The Admin > Email tab's "Remind missing picks" button works locally, but a
 *scheduled, automatic* reminder needs something that runs even when your
 computer is off — that's what Vercel Cron provides, and it only exists once
 the app is deployed to Vercel (step 7 above).
 
-What's already wired up: `vercel.json` schedules a call to
-`/api/cron/remind-missing-picks` every Saturday at 10:00 AM Central — split
-into two entries so it stays correct across the daylight-saving change
-partway through the season (one entry for Sept/Oct, one for Nov–Feb). It
-checks whichever week is set as "current week" in Admin, finds every entry
-that's still alive with no pick in yet, and emails them the same way the
-manual button does.
+What's already wired up: `vercel.json` schedules two calls a week to
+`/api/cron/remind-missing-picks` — **Saturday at 10:00 AM Central** and
+**Sunday at 7:00 AM Central** — each split into two entries so they stay
+correct across the daylight-saving change partway through the season (one
+entry per pair for Sept/Oct, one for Nov–Feb). Each run checks whichever
+week is set as "current week" in Admin, finds every entry that's still
+alive with no pick in yet, and emails them the same way the manual button
+does.
 
 Vercel automatically sends your `CRON_SECRET` back as an `Authorization`
 header when it triggers the cron — that's how the route confirms the request
 is really from Vercel and not a random visitor hitting the URL. As long as
 you added `CRON_SECRET` in step 7's environment variables, this works
-automatically after your next deploy; you'll see it listed under your
-Vercel project's **Cron Jobs** tab once it's live.
+automatically after your next deploy; you'll see all 4 entries listed under
+your Vercel project's **Cron Jobs** tab once it's live.
 
 Things worth knowing:
-- **Vercel's free (Hobby) tier caps cron jobs at running no more than once a
-  day** — a weekly Saturday run is well within that, so no upgrade needed.
+- **Vercel's free (Hobby) tier caps how often a single cron job can fire —
+  no more than once a day per entry.** Each of these 4 entries only ever
+  fires once a day (a couple are Saturday-only, a couple Sunday-only), so
+  that limit is fine. Some Vercel plans also cap the *total number* of cron
+  jobs on an account — if the Cron Jobs tab doesn't show all 4 after
+  deploying, that's the likely reason, and it would mean combining or
+  trimming entries (or upgrading) rather than a bug in the setup.
 - It goes off whichever week is set as **current week** in Admin. If you
   forget to advance that after finalizing a week, the reminder would nag
   people about the wrong week — worth keeping that field current.
