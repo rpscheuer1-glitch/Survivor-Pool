@@ -616,6 +616,8 @@ function RosterTab() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [savedIds, setSavedIds] = useState({});
+  const [sortKey, setSortKey] = useState("name");
+  const [sortDir, setSortDir] = useState("asc");
 
   useEffect(() => {
     (async () => {
@@ -634,10 +636,33 @@ function RosterTab() {
     setTimeout(() => setSavedIds((s) => ({ ...s, [id]: false })), 1500);
   };
 
+  const toggleSort = (key) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
+  };
+
   const filtered = rows.filter((r) => {
     const q = search.toLowerCase();
     return !q || (r.display_name || "").toLowerCase().includes(q) || (r.email || "").toLowerCase().includes(q);
   });
+
+  const sorted = [...filtered].sort((a, b) => {
+    let cmp = 0;
+    if (sortKey === "name") {
+      cmp = (a.display_name || "").localeCompare(b.display_name || "");
+    } else if (sortKey === "entries") {
+      cmp = a.entryCount - b.entryCount;
+    } else if (sortKey === "payment") {
+      cmp = (a.payment_note || "").localeCompare(b.payment_note || "");
+    }
+    return sortDir === "asc" ? cmp : -cmp;
+  });
+
+  const arrow = (key) => (sortKey === key ? (sortDir === "asc" ? " ▲" : " ▼") : "");
 
   if (loading) return <p className="text-chalk/60 text-sm">Loading roster…</p>;
 
@@ -650,24 +675,49 @@ function RosterTab() {
         className="max-w-sm mb-4"
       />
       <p className="text-xs text-chalk/50 mb-3">{rows.length} people signed up total.</p>
-      <div className="grid gap-2">
-        {filtered.map((r) => (
-          <div key={r.id} className="border border-turfline rounded-lg p-3 flex items-center gap-3 flex-wrap">
-            <div className="flex-1 min-w-[200px]">
-              <div className="font-bold text-sm">{r.display_name || "(no name)"}</div>
-              <div className="text-xs text-chalk/50">{r.email}</div>
-            </div>
-            <span className="text-xs text-chalk/50 w-20 flex-shrink-0">{r.entryCount} entr{r.entryCount === 1 ? "y" : "ies"}</span>
-            <input
-              placeholder="How they paid (e.g. Venmo, cash)"
-              defaultValue={r.payment_note || ""}
-              onBlur={(e) => savePayment(r.id, e.target.value)}
-              className="flex-1 min-w-[220px]"
-            />
-            {savedIds[r.id] && <span className="text-leaf text-xs">Saved</span>}
-          </div>
-        ))}
-        {filtered.length === 0 && <p className="text-chalk/50 text-sm">No matches.</p>}
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr className="text-left text-chalk/50">
+              <th className="py-2 px-2 cursor-pointer select-none" onClick={() => toggleSort("name")}>
+                Name{arrow("name")}
+              </th>
+              <th className="py-2 px-2 cursor-pointer select-none w-28" onClick={() => toggleSort("entries")}>
+                # Entries{arrow("entries")}
+              </th>
+              <th className="py-2 px-2 cursor-pointer select-none" onClick={() => toggleSort("payment")}>
+                How they paid{arrow("payment")}
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map((r) => (
+              <tr key={r.id} className="border-t border-turfline">
+                <td className="py-2 px-2">
+                  <div className="font-bold">{r.display_name || "(no name)"}</div>
+                  <div className="text-xs text-chalk/50">{r.email}</div>
+                </td>
+                <td className="py-2 px-2">{r.entryCount}</td>
+                <td className="py-2 px-2">
+                  <div className="flex items-center gap-2">
+                    <input
+                      placeholder="How they paid (e.g. Venmo, cash)"
+                      defaultValue={r.payment_note || ""}
+                      onBlur={(e) => savePayment(r.id, e.target.value)}
+                      className="flex-1 min-w-[200px]"
+                    />
+                    {savedIds[r.id] && <span className="text-leaf text-xs flex-shrink-0">Saved</span>}
+                  </div>
+                </td>
+              </tr>
+            ))}
+            {sorted.length === 0 && (
+              <tr>
+                <td colSpan={3} className="py-3 text-chalk/50">No matches.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
     </div>
   );
