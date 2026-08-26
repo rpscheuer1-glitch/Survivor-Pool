@@ -72,6 +72,35 @@ a real transactional email service wouldn't be. Fine for occasional
 reminders to a few hundred people; not something to rely on for anything
 time-critical or frequent.
 
+## 6b. Point Supabase's own emails through Gmail too (password reset)
+
+Separate from the Admin > Email tool above, Supabase sends its *own* emails
+for things like password reset links. Out of the box it uses a tiny built-in
+sender capped at roughly 2 emails per hour total — fine for testing, not
+enough for a real pool (this is exactly what caused the "email rate limit
+exceeded" error during signups earlier).
+
+Since you already have a working Gmail sender, point Supabase's auth emails
+through that same account instead:
+
+1. Supabase → **Project Settings → Authentication → SMTP Settings** (exact
+   location may say just "SMTP Settings" depending on Supabase's current
+   layout).
+2. Turn on **"Enable Custom SMTP"**.
+3. Fill in:
+   - **Sender email**: `scheuerfootball@gmail.com`
+   - **Sender name**: whatever you'd like shown (e.g. "Scheuer Survivor Pool")
+   - **Host**: `smtp.gmail.com`
+   - **Port**: `587`
+   - **Username**: `scheuerfootball@gmail.com`
+   - **Password**: the same 16-character **App Password** already sitting in
+     your `GMAIL_APP_PASSWORD` env var — not the regular Gmail login password.
+4. Save.
+
+Once this is set, password reset emails (and any other Supabase auth email)
+route through Gmail instead of the tiny built-in sender, so they won't hit
+that rate limit again.
+
 ## 7. Deploy it for real (Vercel, free)
 
 1. Create a free account at github.com if you don't have one, and a new

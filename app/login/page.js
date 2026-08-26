@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { supabase } from "../../lib/supabaseClient";
 import GoogleSignInButton from "../GoogleSignInButton";
 
@@ -45,6 +46,9 @@ export default function LoginPage() {
         {error && <p className="text-rust text-sm">{error}</p>}
         <button className="btn-primary" disabled={busy}>{busy ? "Logging in…" : "Log in"}</button>
       </form>
+      <Link href="/forgot-password" className="text-xs text-chalk/50 hover:text-amber block mt-3">
+        Forgot your password?
+      </Link>
     </div>
   );
 }
