@@ -664,16 +664,38 @@ function RosterTab() {
 
   const arrow = (key) => (sortKey === key ? (sortDir === "asc" ? " ▲" : " ▼") : "");
 
+  const exportCSV = () => {
+    const escape = (val) => `"${String(val ?? "").replace(/"/g, '""')}"`;
+    const headers = ["Name", "Email", "# Entries", "How they paid"];
+    const csvRows = [headers.join(",")];
+    sorted.forEach((r) => {
+      csvRows.push([escape(r.display_name), escape(r.email), r.entryCount, escape(r.payment_note)].join(","));
+    });
+    const csvContent = csvRows.join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `roster-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   if (loading) return <p className="text-chalk/60 text-sm">Loading roster…</p>;
 
   return (
     <div>
-      <input
-        placeholder="Search by name or email…"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        className="max-w-sm mb-4"
-      />
+      <div className="flex items-center gap-3 flex-wrap mb-4">
+        <input
+          placeholder="Search by name or email…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="max-w-sm"
+        />
+        <button className="btn-ghost" onClick={exportCSV}>Export to CSV</button>
+      </div>
       <p className="text-xs text-chalk/50 mb-3">{rows.length} people signed up total.</p>
       <div className="overflow-x-auto">
         <table className="w-full text-sm border-collapse">
