@@ -631,7 +631,9 @@ function RosterTab() {
   }, []);
 
   const savePayment = async (id, value) => {
-    await supabase.from("profiles").update({ payment_note: value }).eq("id", id);
+    const { error } = await supabase.from("profiles").update({ payment_note: value }).eq("id", id);
+    if (error) return;
+    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, payment_note: value } : r)));
     setSavedIds((s) => ({ ...s, [id]: true }));
     setTimeout(() => setSavedIds((s) => ({ ...s, [id]: false })), 1500);
   };

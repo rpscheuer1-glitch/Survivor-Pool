@@ -1,5 +1,5 @@
 import { supabase } from "../../../../lib/supabaseClient";
-import { computeStatus, computeAutoCurrentWeek } from "../../../../lib/poolLogic";
+import { computeStatus, computeAutoCurrentWeek, hasUpcomingDeadlineSoon } from "../../../../lib/poolLogic";
 import { sendBulkEmail } from "../../../../lib/serverEmail";
 
 // Triggered by Vercel Cron (see vercel.json) — not meant to be called by a
@@ -40,6 +40,10 @@ export async function GET(request) {
   // the old manual pool_settings.current_week field (which nothing updates
   // anymore since that switch).
   const week = computeAutoCurrentWeek(gamesByWeek);
+
+  if (!hasUpcomingDeadlineSoon(gamesByWeek, week)) {
+    return Response.json({ skipped: true, reason: "No deadline for this week is coming up in the next few days.", week });
+  }
 
   const picksByEntry = {};
   (pickRows || []).forEach((p) => {
