@@ -131,6 +131,12 @@ export default function Standings() {
             </span>
           </summary>
           <div className="px-4 pb-4">
+            {!w.isFinal && (
+              <p className="text-xs text-amber/80 mb-3">
+                This week isn't marked final yet — wins/losses shown below are accurate, but nobody is officially
+                eliminated until it's finalized in Admin.
+              </p>
+            )}
             <div className="grid gap-2">
               {w.rows.map((r) => {
                 const pct = w.remaining > 0 ? (r.count / w.remaining) * 100 : 0;
@@ -159,7 +165,9 @@ export default function Standings() {
                   <div className="flex-1" />
                   <span className="w-16 flex-shrink-0" />
                   <span className="w-10 text-right text-xs text-chalk/60 flex-shrink-0">{w.noPick}</span>
-                  <span className="w-20 flex-shrink-0 text-right"><Pill tone="red">Eliminated</Pill></span>
+                  <span className="w-20 flex-shrink-0 text-right">
+                    {w.isFinal ? <Pill tone="red">Eliminated</Pill> : <Pill tone="amber">Pending</Pill>}
+                  </span>
                 </div>
               )}
               {w.rows.length === 0 && w.noPick === 0 && (
