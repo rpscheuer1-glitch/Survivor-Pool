@@ -85,7 +85,37 @@ export default function Standings() {
           })
           .sort((a, b) => b.count - a.count);
 
-        return { week: wk, remaining: remainingEntries.length, rows, noPick, isFinal: !!finalByWeek[wk] };
+        // Individual, per-entry picks -- same reveal rule as the tally above:
+        // a specific pick only shows once that specific game has locked.
+        const entryPicks = remainingEntries
+          .map((s) => {
+            const pick = s.status.detail[wk]?.pick || null;
+            let revealed = false;
+            let result = null;
+            if (pick) {
+              const game = games.find((g) => g.home === pick || g.away === pick);
+              revealed = !game || isLocked(game);
+              if (revealed && game?.winner) result = game.winner === pick ? "win" : "loss";
+            }
+            return {
+              label: s.entry.label,
+              email: s.entry.email,
+              hasPick: !!pick,
+              revealed,
+              pick: revealed ? pick : null,
+              result,
+            };
+          })
+          .sort((a, b) => (a.label || "").localeCompare(b.label || ""));
+
+        return {
+          week: wk,
+          remaining: remainingEntries.length,
+          rows,
+          noPick,
+          isFinal: !!finalByWeek[wk],
+          entryPicks,
+        };
       }).filter((w) => w.week <= computeAutoCurrentWeek(gamesByWeek));
 
       setWeekly(weekly);
@@ -123,60 +153,129 @@ export default function Standings() {
       </div>
       <p className="text-sm text-chalk/60">{totalEntries} total entries in the pool.</p>
       {weekly.map((w) => (
-        <details key={w.week} open={w.week === latestWeek} className="border border-turfline rounded-lg">
-          <summary className="cursor-pointer px-4 py-3 font-bold flex justify-between items-center flex-wrap gap-2">
-            <span>Week {w.week}</span>
-            <span className="text-sm font-normal text-chalk/60">
-              {w.remaining} entries remaining entering this week
-            </span>
-          </summary>
-          <div className="px-4 pb-4">
-            {!w.isFinal && (
-              <p className="text-xs text-amber/80 mb-3">
-                This week isn't marked final yet — wins/losses shown below are accurate, but nobody is officially
-                eliminated until it's finalized in Admin.
-              </p>
-            )}
-            <div className="grid gap-2">
-              {w.rows.map((r) => {
-                const pct = w.remaining > 0 ? (r.count / w.remaining) * 100 : 0;
-                const barColor = r.result === "win" ? "#3FA66C" : r.result === "loss" ? "#D6453A" : "#F2661A";
-                return (
-                  <div key={r.team} className="flex items-center gap-3 text-sm">
-                    <span className="w-11 text-xs font-black text-chalk/60 flex-shrink-0">{abbr(r.team)}</span>
-                    <span className="w-40 flex-shrink-0 truncate">{r.team}</span>
-                    <div className="flex-1 h-2 rounded-full bg-white/10 overflow-hidden">
-                      <div style={{ width: `${pct}%`, background: barColor }} className="h-full rounded-full" />
-                    </div>
-                    <span className="w-16 text-right text-xs text-chalk/60 flex-shrink-0">{pct.toFixed(1)}%</span>
-                    <span className="w-10 text-right text-xs text-chalk/60 flex-shrink-0">{r.count}</span>
-                    <span className="w-20 flex-shrink-0 text-right">
-                      {r.result === "win" && <Pill tone="green">Win</Pill>}
-                      {r.result === "loss" && <Pill tone="red">Loss</Pill>}
-                      {r.result === "pending" && <Pill tone="amber">Pending</Pill>}
-                    </span>
-                  </div>
-                );
-              })}
-              {w.noPick > 0 && (
-                <div className="flex items-center gap-3 text-sm border-t border-turfline pt-2 mt-1">
-                  <span className="w-11 flex-shrink-0" />
-                  <span className="w-40 flex-shrink-0 text-chalk/60">No pick submitted</span>
-                  <div className="flex-1" />
-                  <span className="w-16 flex-shrink-0" />
-                  <span className="w-10 text-right text-xs text-chalk/60 flex-shrink-0">{w.noPick}</span>
-                  <span className="w-20 flex-shrink-0 text-right">
-                    {w.isFinal ? <Pill tone="red">Eliminated</Pill> : <Pill tone="amber">Pending</Pill>}
-                  </span>
-                </div>
-              )}
-              {w.rows.length === 0 && w.noPick === 0 && (
-                <p className="text-chalk/50 text-sm">No picks submitted yet.</p>
-              )}
-            </div>
-          </div>
-        </details>
+        <WeekCard key={w.week} w={w} isOpenByDefault={w.week === latestWeek} />
       ))}
     </div>
+  );
+}
+
+function WeekCard({ w, isOpenByDefault }) {
+  const [showIndividual, setShowIndividual] = useState(false);
+  const [search, setSearch] = useState("");
+
+  const filteredEntryPicks = w.entryPicks.filter((e) => {
+    const q = search.toLowerCase();
+    return !q || (e.label || "").toLowerCase().includes(q) || (e.email || "").toLowerCase().includes(q);
+  });
+
+  return (
+    <details open={isOpenByDefault} className="border border-turfline rounded-lg">
+      <summary className="cursor-pointer px-4 py-3 font-bold flex justify-between items-center flex-wrap gap-2">
+        <span>Week {w.week}</span>
+        <span className="text-sm font-normal text-chalk/60">
+          {w.remaining} entries remaining entering this week
+        </span>
+      </summary>
+      <div className="px-4 pb-4">
+        {!w.isFinal && (
+          <p className="text-xs text-amber/80 mb-3">
+            This week isn't marked final yet — wins/losses shown below are accurate, but nobody is officially
+            eliminated until it's finalized in Admin.
+          </p>
+        )}
+        <div className="grid gap-2 mb-4">
+          {w.rows.map((r) => {
+            const pct = w.remaining > 0 ? (r.count / w.remaining) * 100 : 0;
+            const barColor = r.result === "win" ? "#3FA66C" : r.result === "loss" ? "#D6453A" : "#F2661A";
+            return (
+              <div key={r.team} className="flex items-center gap-3 text-sm">
+                <span className="w-11 text-xs font-black text-chalk/60 flex-shrink-0">{abbr(r.team)}</span>
+                <span className="w-40 flex-shrink-0 truncate">{r.team}</span>
+                <div className="flex-1 h-2 rounded-full bg-white/10 overflow-hidden">
+                  <div style={{ width: `${pct}%`, background: barColor }} className="h-full rounded-full" />
+                </div>
+                <span className="w-16 text-right text-xs text-chalk/60 flex-shrink-0">{pct.toFixed(1)}%</span>
+                <span className="w-10 text-right text-xs text-chalk/60 flex-shrink-0">{r.count}</span>
+                <span className="w-20 flex-shrink-0 text-right">
+                  {r.result === "win" && <Pill tone="green">Win</Pill>}
+                  {r.result === "loss" && <Pill tone="red">Loss</Pill>}
+                  {r.result === "pending" && <Pill tone="amber">Pending</Pill>}
+                </span>
+              </div>
+            );
+          })}
+          {w.noPick > 0 && (
+            <div className="flex items-center gap-3 text-sm border-t border-turfline pt-2 mt-1">
+              <span className="w-11 flex-shrink-0" />
+              <span className="w-40 flex-shrink-0 text-chalk/60">No pick submitted</span>
+              <div className="flex-1" />
+              <span className="w-16 flex-shrink-0" />
+              <span className="w-10 text-right text-xs text-chalk/60 flex-shrink-0">{w.noPick}</span>
+              <span className="w-20 flex-shrink-0 text-right">
+                {w.isFinal ? <Pill tone="red">Eliminated</Pill> : <Pill tone="amber">Pending</Pill>}
+              </span>
+            </div>
+          )}
+          {w.rows.length === 0 && w.noPick === 0 && (
+            <p className="text-chalk/50 text-sm">No picks submitted yet.</p>
+          )}
+        </div>
+
+        <button className="btn-ghost text-xs" onClick={() => setShowIndividual((s) => !s)}>
+          {showIndividual ? "Hide individual picks" : "Show individual picks"}
+        </button>
+
+        {showIndividual && (
+          <div className="mt-3">
+            <input
+              placeholder="Search by name or email…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="max-w-sm mb-3"
+            />
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm border-collapse">
+                <thead>
+                  <tr className="text-left text-chalk/50">
+                    <th className="py-1 px-2">Entry</th>
+                    <th className="py-1 px-2">Pick</th>
+                    <th className="py-1 px-2">Result</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredEntryPicks.map((e, i) => (
+                    <tr key={i} className="border-t border-turfline">
+                      <td className="py-2 px-2">
+                        <div className="font-bold">{e.label}</div>
+                        <div className="text-xs text-chalk/50">{e.email}</div>
+                      </td>
+                      <td className="py-2 px-2">
+                        {e.hasPick && !e.revealed ? (
+                          <span className="text-chalk/50 italic text-xs">Hidden until locked</span>
+                        ) : (
+                          e.pick || <span className="text-chalk/50">—</span>
+                        )}
+                      </td>
+                      <td className="py-2 px-2">
+                        {e.result === "win" && <Pill tone="green">Win</Pill>}
+                        {e.result === "loss" && <Pill tone="red">Loss</Pill>}
+                        {e.hasPick && e.revealed && !e.result && <Pill tone="amber">Pending</Pill>}
+                        {e.hasPick && !e.revealed && <Pill tone="gray">Locked soon</Pill>}
+                        {!e.hasPick && <Pill tone="red">No pick</Pill>}
+                      </td>
+                    </tr>
+                  ))}
+                  {filteredEntryPicks.length === 0 && (
+                    <tr>
+                      <td colSpan={3} className="py-3 text-chalk/50">No matches.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
+    </details>
   );
 }

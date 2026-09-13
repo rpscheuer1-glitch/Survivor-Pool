@@ -8,6 +8,7 @@ export default function SignupPage() {
   const router = useRouter();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [confirmEmail, setConfirmEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -27,13 +28,17 @@ export default function SignupPage() {
     e.preventDefault();
     setError("");
     setNotice("");
+    if (email.trim().toLowerCase() !== confirmEmail.trim().toLowerCase()) {
+      setError("Those two emails don't match — please double check and re-type both.");
+      return;
+    }
     if (password.length < 6) {
       setError("Password must be at least 6 characters.");
       return;
     }
     setBusy(true);
     const { data, error: signErr } = await supabase.auth.signUp({
-      email,
+      email: email.trim(),
       password,
       options: { data: { display_name: name } },
     });
@@ -78,7 +83,28 @@ export default function SignupPage() {
         </div>
         <div>
           <label className="text-xs text-chalk/60">Email</label>
-          <input type="email" className="w-full mt-1" value={email} onChange={(e) => setEmail(e.target.value)} required />
+          <input
+            type="email"
+            className="w-full mt-1"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            onPaste={(e) => e.preventDefault()}
+            required
+          />
+        </div>
+        <div>
+          <label className="text-xs text-chalk/60">Confirm email</label>
+          <input
+            type="email"
+            className="w-full mt-1"
+            value={confirmEmail}
+            onChange={(e) => setConfirmEmail(e.target.value)}
+            onPaste={(e) => e.preventDefault()}
+            required
+          />
+          <p className="text-xs text-chalk/40 mt-1">
+            Please type it again rather than pasting — this is here specifically to catch typos.
+          </p>
         </div>
         <div>
           <label className="text-xs text-chalk/60">Password (6+ characters)</label>
