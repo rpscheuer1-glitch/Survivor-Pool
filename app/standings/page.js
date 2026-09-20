@@ -104,6 +104,7 @@ export default function Standings() {
               revealed,
               pick: revealed ? pick : null,
               result,
+              auto: !!s.status.detail[wk]?.auto,
             };
           })
           .sort((a, b) => (a.label || "").localeCompare(b.label || ""));
@@ -253,7 +254,12 @@ function WeekCard({ w, isOpenByDefault }) {
                         {e.hasPick && !e.revealed ? (
                           <span className="text-chalk/50 italic text-xs">Hidden until locked</span>
                         ) : (
-                          e.pick || <span className="text-chalk/50">—</span>
+                          <>
+                            {e.pick || <span className="text-chalk/50">—</span>}
+                            {e.revealed && e.auto && (
+                              <span className="text-amber text-xs ml-1" title="Set by the lock-in tool, not the participant">(auto)</span>
+                            )}
+                          </>
                         )}
                       </td>
                       <td className="py-2 px-2">

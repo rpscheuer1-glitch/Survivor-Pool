@@ -944,6 +944,8 @@ function ManagePicksTab() {
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [savedIds, setSavedIds] = useState({});
+  const [statusByEntry, setStatusByEntry] = useState({}); // entry_id -> computeStatus result
+  const [onlyAlive, setOnlyAlive] = useState(true);
 
   useEffect(() => {
     (async () => {
@@ -976,6 +978,38 @@ function ManagePicksTab() {
     } else {
       setPicks({});
     }
+
+    // Full-season data, needed to tell alive entries apart from ones already
+    // eliminated in an earlier week -- both can show "no pick" for the
+    // current week, so this is the only way to tell them apart.
+    const { data: allGameRows } = await supabase.from("games").select("*");
+    const { data: allWeekRows } = await supabase.from("weeks").select("*");
+    const { data: allPickRows } = await supabase.from("picks").select("*");
+
+    const finalByWeek = {};
+    const lockSettingsByWeek = {};
+    (allWeekRows || []).forEach((w) => {
+      finalByWeek[w.week] = w.final;
+      lockSettingsByWeek[w.week] = { day: w.weekend_lock_day, time: w.weekend_lock_time };
+    });
+    const gamesByWeek = {};
+    (allGameRows || []).forEach((g) => {
+      const settings = lockSettingsByWeek[g.week] || {};
+      const enriched = { ...g, weekend_lock_day: settings.day, weekend_lock_time: settings.time };
+      gamesByWeek[g.week] = gamesByWeek[g.week] || [];
+      gamesByWeek[g.week].push(enriched);
+    });
+    const picksByEntry = {};
+    (allPickRows || []).forEach((p) => {
+      picksByEntry[p.entry_id] = picksByEntry[p.entry_id] || {};
+      picksByEntry[p.entry_id][p.week] = { team: p.team, auto: p.auto_assigned };
+    });
+    const statuses = {};
+    (entryRows || []).forEach((e) => {
+      statuses[e.id] = computeStatus(picksByEntry[e.id] || {}, gamesByWeek, finalByWeek);
+    });
+    setStatusByEntry(statuses);
+
     setLoading(false);
   }, [week]);
 
@@ -1015,7 +1049,13 @@ function ManagePicksTab() {
 
   const filtered = entries.filter((e) => {
     const q = search.toLowerCase();
-    return !q || (e.label || "").toLowerCase().includes(q) || (e.email || "").toLowerCase().includes(q);
+    const matchesSearch = !q || (e.label || "").toLowerCase().includes(q) || (e.email || "").toLowerCase().includes(q);
+    if (!matchesSearch) return false;
+    if (onlyAlive) {
+      const status = statusByEntry[e.id];
+      if (status?.eliminated) return false;
+    }
+    return true;
   });
 
   return (
@@ -1025,6 +1065,10 @@ function ManagePicksTab() {
         Existing picks stay hidden here too, even from you, until that specific game locks — you can still set a new pick for someone without seeing what's already there.
       </p>
       <div className="flex gap-3 flex-wrap items-center mb-4">
+        <label className="text-xs flex items-center gap-2">
+          <input type="checkbox" checked={onlyAlive} onChange={(e) => setOnlyAlive(e.target.checked)} />
+          Only show entries still alive
+        </label>
         <label className="text-xs flex items-center gap-2">
           Week
           <select value={week} onChange={(e) => setWeek(Number(e.target.value))} className="w-32">
@@ -1057,7 +1101,14 @@ function ManagePicksTab() {
             return (
               <div key={entry.id} className="border border-turfline rounded-lg p-3 flex items-center gap-3 flex-wrap">
                 <div className="flex-1 min-w-[200px]">
-                  <div className="font-bold text-sm">{entry.label}</div>
+                  <div className="font-bold text-sm flex items-center gap-2">
+                    {entry.label}
+                    {statusByEntry[entry.id]?.eliminated ? (
+                      <span className="pill pill-red">Eliminated wk {statusByEntry[entry.id].eliminatedWeek}</span>
+                    ) : (
+                      <span className="pill pill-green">Alive</span>
+                    )}
+                  </div>
                   <div className="text-xs text-chalk/50">{entry.email}</div>
                 </div>
                 <select
