@@ -7,11 +7,12 @@
 // different, far more robust kind of infrastructure for this than a sports
 // site's own undocumented API, and isn't something we've seen blocked.
 //
-// Nice side effect: this data already includes real scores AND spreads in
-// the exact "negative = home favored" convention this app already uses, so
-// there's no odds-provider parsing/sign-guessing needed like ESPN required.
-// It's also indexed by season+week directly, so there's no more need to
-// guess date ranges at all.
+// Nice side effect: this data already includes real scores AND spreads, and
+// unlike ESPN's odds we don't need favorite/underdog boolean flags to figure
+// out direction -- just a sign flip, since nflverse's spread_line uses
+// positive = home favored (opposite of this app's own convention). It's
+// also indexed by season+week directly, so there's no more need to guess
+// date ranges at all.
 
 const NFLVERSE_GAMES_URL = "https://raw.githubusercontent.com/nflverse/nfldata/master/data/games.csv";
 
@@ -87,7 +88,10 @@ export async function GET(request) {
           const as = Number(awayScoreStr);
           if (hs !== as) winner = hs > as ? home : away;
         }
-        const spread = spreadStr !== "" && spreadStr != null ? Number(spreadStr) : null;
+        // nflverse's spread_line uses positive = home favored -- the
+        // opposite of this app's own convention (negative = home favored,
+        // matching standard sportsbook display). Flip the sign to convert.
+        const spread = spreadStr !== "" && spreadStr != null ? -Number(spreadStr) : null;
 
         return {
           home,
