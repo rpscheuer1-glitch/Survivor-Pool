@@ -164,9 +164,15 @@ function GamesTab() {
 
     let base;
     if (week1Games && week1Games.length > 0) {
-      const earliest = week1Games.map((g) => g.game_date).sort()[0];
-      const [y, m, d] = earliest.split("-").map(Number);
+      // Use the median game date, not the earliest -- a single early one-off
+      // game (like a Wednesday opener) would otherwise shift every future
+      // week's calculated range by that same amount. The median sits inside
+      // the main Thu/Sun/Mon cluster even with one early or late outlier.
+      const sortedDates = week1Games.map((g) => g.game_date).sort();
+      const median = sortedDates[Math.floor(sortedDates.length / 2)];
+      const [y, m, d] = median.split("-").map(Number);
       base = new Date(Date.UTC(y, m - 1, d));
+      base.setUTCDate(base.getUTCDate() - 3); // approximate that week's Thursday from a mid-week date
     } else {
       base = new Date(kickoffDate + "T00:00:00Z");
     }
@@ -208,8 +214,26 @@ function GamesTab() {
     setResultsError("");
     setResultsMessage("");
     try {
-      const startStr = await getWeekStartDate(editWeek);
-      const res = await fetch(`/api/schedule?start=${startStr}&days=8`);
+      // This week's games are already loaded -- use their real dates directly
+      // rather than extrapolating from Week 1's earliest game (fragile if
+      // Week 1 ever has an early one-off game, e.g. a Wednesday opener).
+      const knownDates = games.map((g) => g.game_date).filter(Boolean).sort();
+      let startStr;
+      let days;
+      if (knownDates.length > 0) {
+        const [y, m, d] = knownDates[0].split("-").map(Number);
+        const [ey, em, ed] = knownDates[knownDates.length - 1].split("-").map(Number);
+        const start = new Date(Date.UTC(y, m - 1, d));
+        const end = new Date(Date.UTC(ey, em - 1, ed));
+        start.setUTCDate(start.getUTCDate() - 1); // small buffer on both ends
+        end.setUTCDate(end.getUTCDate() + 1);
+        startStr = start.toISOString().slice(0, 10);
+        days = Math.round((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)) + 1;
+      } else {
+        startStr = await getWeekStartDate(editWeek);
+        days = 8;
+      }
+      const res = await fetch(`/api/schedule?start=${startStr}&days=${days}`);
       const json = await res.json();
       if (json.error) {
         setResultsError(json.error);
