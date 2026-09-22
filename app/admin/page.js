@@ -61,7 +61,7 @@ function GamesTab() {
   const [loadingData, setLoadingData] = useState(true);
   const [error, setError] = useState("");
 
-  const [kickoffDate, setKickoffDate] = useState("2026-09-10");
+  const [seasonYear, setSeasonYear] = useState(2026);
   const [scheduleGames, setScheduleGames] = useState([]);
   const [scheduleLoading, setScheduleLoading] = useState(false);
   const [scheduleError, setScheduleError] = useState("");
@@ -151,53 +151,18 @@ function GamesTab() {
     setGames((prev) => [...prev, data]);
   };
 
-  // Prefers deriving the target week's date window from Week 1's actual
-  // loaded games (earliest game_date + 7 days per week) rather than trusting
-  // the manually-typed kickoff field every time -- that field only matters
-  // for bootstrapping before Week 1 has any games in it yet.
-  const getWeekStartDate = async (week) => {
-    const { data: week1Games } = await supabase
-      .from("games")
-      .select("game_date")
-      .eq("week", 1)
-      .not("game_date", "is", null);
-
-    let base;
-    if (week1Games && week1Games.length > 0) {
-      // Use the median game date, not the earliest -- a single early one-off
-      // game (like a Wednesday opener) would otherwise shift every future
-      // week's calculated range by that same amount. The median sits inside
-      // the main Thu/Sun/Mon cluster even with one early or late outlier.
-      const sortedDates = week1Games.map((g) => g.game_date).sort();
-      const median = sortedDates[Math.floor(sortedDates.length / 2)];
-      const [y, m, d] = median.split("-").map(Number);
-      base = new Date(Date.UTC(y, m - 1, d));
-      base.setUTCDate(base.getUTCDate() - 3); // approximate that week's Thursday from a mid-week date
-    } else {
-      base = new Date(kickoffDate + "T00:00:00Z");
-    }
-    base.setUTCDate(base.getUTCDate() + (week - 1) * 7);
-    return base.toISOString().slice(0, 10);
-  };
-
   const fetchSchedule = async () => {
     setScheduleLoading(true);
     setScheduleError("");
     setScheduleGames([]);
     try {
-      const startStr = await getWeekStartDate(editWeek);
-      const res = await fetch(`/api/schedule?start=${startStr}&days=8`);
+      const res = await fetch(`/api/schedule?week=${editWeek}&season=${seasonYear}`);
       const json = await res.json();
       if (json.error) {
         setScheduleError(json.error);
       } else {
         setScheduleGames(json.games);
-        if (json.games.length === 0) setScheduleError("No games found in that date range — try adjusting the kickoff date.");
-        else if (json.partialFailureDays) {
-          setScheduleError(
-            `Note: ESPN failed for ${json.partialFailureDays.length} day(s) in this range (${json.partialFailureDays.join(", ")}) — results below may be incomplete.`
-          );
-        }
+        if (json.games.length === 0) setScheduleError("No games found for that week/season — double check the season year.");
       }
     } catch (e) {
       setScheduleError("Couldn't reach the schedule service: " + e.message);
@@ -208,7 +173,7 @@ function GamesTab() {
   const addAllScheduleGames = async () => {
     await Promise.all(
       scheduleGames.map((g) =>
-        addGame({ home: g.home, away: g.away, game_date: g.game_date })
+        addGame({ home: g.home, away: g.away, game_date: g.game_date, spread: g.spread ?? 0 })
       )
     );
     setScheduleGames([]);
@@ -219,26 +184,7 @@ function GamesTab() {
     setResultsError("");
     setResultsMessage("");
     try {
-      // This week's games are already loaded -- use their real dates directly
-      // rather than extrapolating from Week 1's earliest game (fragile if
-      // Week 1 ever has an early one-off game, e.g. a Wednesday opener).
-      const knownDates = games.map((g) => g.game_date).filter(Boolean).sort();
-      let startStr;
-      let days;
-      if (knownDates.length > 0) {
-        const [y, m, d] = knownDates[0].split("-").map(Number);
-        const [ey, em, ed] = knownDates[knownDates.length - 1].split("-").map(Number);
-        const start = new Date(Date.UTC(y, m - 1, d));
-        const end = new Date(Date.UTC(ey, em - 1, ed));
-        start.setUTCDate(start.getUTCDate() - 1); // small buffer on both ends
-        end.setUTCDate(end.getUTCDate() + 1);
-        startStr = start.toISOString().slice(0, 10);
-        days = Math.round((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)) + 1;
-      } else {
-        startStr = await getWeekStartDate(editWeek);
-        days = 8;
-      }
-      const res = await fetch(`/api/schedule?start=${startStr}&days=${days}`);
+      const res = await fetch(`/api/schedule?week=${editWeek}&season=${seasonYear}`);
       const json = await res.json();
       if (json.error) {
         setResultsError(json.error);
@@ -269,13 +215,10 @@ function GamesTab() {
         }
       }
 
-      const partialNote = json.partialFailureDays
-        ? ` (Note: ESPN failed for ${json.partialFailureDays.length} day(s) in this range — some results may be missing.)`
-        : "";
       setResultsMessage(
-        (winnersSet === 0 && spreadsUpdated === 0
-          ? "No updates — either nothing's changed, or ESPN doesn't have this week's lines/results posted yet."
-          : `Updated ${spreadsUpdated} spread(s) and filled in ${winnersSet} winner(s).`) + partialNote
+        winnersSet === 0 && spreadsUpdated === 0
+          ? "No updates — either nothing's changed, or the source doesn't have this week's lines/results posted yet."
+          : `Updated ${spreadsUpdated} spread(s) and filled in ${winnersSet} winner(s).`
       );
     } catch (e) {
       setResultsError("Couldn't reach the schedule service: " + e.message);
@@ -448,15 +391,16 @@ function GamesTab() {
       <div className="border border-turfline rounded-lg p-4">
         <div className="text-sm font-bold mb-1">Sync schedule</div>
         <p className="text-xs text-chalk/50 mb-3">
-          Pulls matchups (not spreads) for the week selected below. Review before adding — you can skip games you don't want.
+          Pulls matchups (and spreads, once posted) for the week selected below. Review before adding — you can skip games you don't want.
         </p>
         <div className="flex gap-3 flex-wrap items-center mb-3">
           <label className="text-xs flex items-center gap-2">
-            Week 1 kickoff date (only used until Week 1 has games loaded)
+            Season year
             <input
-              type="date"
-              value={kickoffDate}
-              onChange={(e) => setKickoffDate(e.target.value)}
+              type="number"
+              value={seasonYear}
+              onChange={(e) => setSeasonYear(Number(e.target.value) || seasonYear)}
+              className="w-24"
             />
           </label>
           <button className="btn-ghost" onClick={fetchSchedule} disabled={scheduleLoading}>
@@ -473,9 +417,10 @@ function GamesTab() {
               <div key={i} className="flex items-center gap-3 flex-wrap text-sm border-t border-turfline pt-2">
                 <span className="flex-1 min-w-[220px]">
                   {g.away} @ {g.home}
-                  {g.date && <span className="text-chalk/40 text-xs"> — {new Date(g.date).toLocaleDateString()}</span>}
+                  {g.game_date && <span className="text-chalk/40 text-xs"> — {g.game_date}</span>}
+                  {g.spread != null && <span className="text-chalk/40 text-xs"> — spread {g.spread}</span>}
                 </span>
-                <button className="btn-ghost" onClick={() => addGame({ home: g.home, away: g.away, game_date: g.game_date })}>
+                <button className="btn-ghost" onClick={() => addGame({ home: g.home, away: g.away, game_date: g.game_date, spread: g.spread ?? 0 })}>
                   Add to week {editWeek}
                 </button>
               </div>
@@ -554,7 +499,7 @@ function GamesTab() {
 
         <div className="flex items-center gap-3 flex-wrap mb-4">
           <button className="btn-ghost" onClick={fetchResultsAndOdds} disabled={resultsLoading || games.length === 0}>
-            {resultsLoading ? "Checking…" : "Sync results & odds from ESPN"}
+            {resultsLoading ? "Checking…" : "Sync results & odds"}
           </button>
           <span className="text-xs text-chalk/50">
             Fills in winners for finished games and refreshes spreads for existing games in this week — only for games already added below.

@@ -1,126 +1,108 @@
-// Server-side route (runs on the server, not the browser) so there's no CORS
-// issue calling ESPN's public scoreboard feed. Only returns matchups + date —
-// no odds/spread data unless ESPN has posted a line yet.
+// Pulls schedule/scores/spreads from nflverse's community-maintained,
+// publicly-hosted CSV on GitHub's raw content CDN. Switched to this after
+// ESPN's own endpoint started reliably blocking requests from Vercel's
+// servers (confirmed via direct testing -- the same request worked fine
+// from a regular browser but failed 100% of the time from our server,
+// across every date format we tried). GitHub's CDN is a fundamentally
+// different, far more robust kind of infrastructure for this than a sports
+// site's own undocumented API, and isn't something we've seen blocked.
+//
+// Nice side effect: this data already includes real scores AND spreads in
+// the exact "negative = home favored" convention this app already uses, so
+// there's no odds-provider parsing/sign-guessing needed like ESPN required.
+// It's also indexed by season+week directly, so there's no more need to
+// guess date ranges at all.
 
-// ESPN returns game times in UTC. Late-night games (Sunday/Monday Night
-// Football, ~8:20pm Eastern) fall past midnight UTC, so naively slicing the
-// UTC date pushes them to the next calendar day (Sunday becomes Monday,
-// Monday becomes Tuesday). NFL scheduling is conventionally referenced in US
-// Eastern time, so we convert to that calendar date instead.
-function toEasternDateString(isoString) {
-  const d = new Date(isoString);
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/New_York",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(d); // en-CA locale conveniently formats as YYYY-MM-DD
-}
+const NFLVERSE_GAMES_URL = "https://raw.githubusercontent.com/nflverse/nfldata/master/data/games.csv";
 
-const ESPN_HEADERS = {
-  "User-Agent":
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-  Accept: "application/json",
+// nflverse's own team abbreviation convention -- confirmed directly against
+// live data. Only one differs from this app's own display abbreviations:
+// nflverse uses "LA" for the Rams (this app's own chips use "LAR").
+const ABBR_TO_NAME = {
+  ARI: "Arizona Cardinals", ATL: "Atlanta Falcons", BAL: "Baltimore Ravens",
+  BUF: "Buffalo Bills", CAR: "Carolina Panthers", CHI: "Chicago Bears",
+  CIN: "Cincinnati Bengals", CLE: "Cleveland Browns", DAL: "Dallas Cowboys",
+  DEN: "Denver Broncos", DET: "Detroit Lions", GB: "Green Bay Packers",
+  HOU: "Houston Texans", IND: "Indianapolis Colts", JAX: "Jacksonville Jaguars",
+  KC: "Kansas City Chiefs", LV: "Las Vegas Raiders", LAC: "Los Angeles Chargers",
+  LA: "Los Angeles Rams", MIA: "Miami Dolphins", MIN: "Minnesota Vikings",
+  NE: "New England Patriots", NO: "New Orleans Saints", NYG: "New York Giants",
+  NYJ: "New York Jets", PHI: "Philadelphia Eagles", PIT: "Pittsburgh Steelers",
+  SF: "San Francisco 49ers", SEA: "Seattle Seahawks", TB: "Tampa Bay Buccaneers",
+  TEN: "Tennessee Titans", WAS: "Washington Commanders",
 };
-
-function mapEvent(event) {
-  const comp = event.competitions?.[0];
-  const competitors = comp?.competitors || [];
-  const home = competitors.find((c) => c.homeAway === "home");
-  const away = competitors.find((c) => c.homeAway === "away");
-  const rawDate = comp?.date || event.date || "";
-  const completed = !!comp?.status?.type?.completed;
-  const winnerCompetitor = completed ? competitors.find((c) => c.winner === true) : null;
-
-  // Odds, if ESPN has posted a line yet (usually only within a week or so of
-  // kickoff). We don't trust the raw sign of odds.spread -- instead we derive
-  // magnitude and figure out which side is favored from the boolean flags,
-  // then convert to our own convention: negative = home favored.
-  const odds = comp?.odds?.[0];
-  let spread = null;
-  if (odds && odds.spread != null) {
-    const magnitude = Math.abs(Number(odds.spread));
-    const homeFavored = !!odds.homeTeamOdds?.favorite;
-    const awayFavored = !!odds.awayTeamOdds?.favorite;
-    if (magnitude > 0 && (homeFavored || awayFavored)) {
-      spread = homeFavored ? -magnitude : magnitude;
-    } else if (magnitude === 0) {
-      spread = 0; // pick 'em
-    }
-  }
-
-  return {
-    id: event.id,
-    home: home?.team?.displayName || "",
-    away: away?.team?.displayName || "",
-    date: rawDate,
-    game_date: rawDate ? toEasternDateString(rawDate) : null,
-    completed,
-    winner: winnerCompetitor?.team?.displayName || null,
-    spread, // null if ESPN doesn't have a line posted yet
-  };
-}
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
-  const start = searchParams.get("start"); // YYYY-MM-DD
-  const days = Number(searchParams.get("days") || 7);
+  const week = Number(searchParams.get("week"));
+  const season = Number(searchParams.get("season"));
 
-  if (!start) {
-    return Response.json({ error: "Missing start date" }, { status: 400 });
+  if (!week || !season) {
+    return Response.json({ error: "Missing week or season" }, { status: 400 });
   }
 
-  const startDate = new Date(start + "T00:00:00Z");
-  if (Number.isNaN(startDate.getTime())) {
-    return Response.json({ error: "Invalid start date" }, { status: 400 });
+  try {
+    const res = await fetch(NFLVERSE_GAMES_URL, { cache: "no-store" });
+    if (!res.ok) {
+      return Response.json({ error: `Couldn't fetch nflverse data: ${res.status}` }, { status: 502 });
+    }
+    const text = await res.text();
+    const lines = text.split("\n").filter((l) => l.trim().length > 0);
+    const header = lines[0].split(",");
+    const col = (name) => header.indexOf(name);
+
+    const seasonIdx = col("season");
+    const typeIdx = col("game_type");
+    const weekIdx = col("week");
+    const gamedayIdx = col("gameday");
+    const awayIdx = col("away_team");
+    const awayScoreIdx = col("away_score");
+    const homeIdx = col("home_team");
+    const homeScoreIdx = col("home_score");
+    const spreadIdx = col("spread_line");
+
+    const games = lines
+      .slice(1)
+      .map((line) => line.split(","))
+      .filter(
+        (cols) =>
+          Number(cols[seasonIdx]) === season &&
+          cols[typeIdx] === "REG" &&
+          Number(cols[weekIdx]) === week
+      )
+      .map((cols) => {
+        const awayAbbr = cols[awayIdx];
+        const homeAbbr = cols[homeIdx];
+        const gameDate = cols[gamedayIdx]; // already YYYY-MM-DD, already the correct calendar day
+        const homeScoreStr = cols[homeScoreIdx];
+        const awayScoreStr = cols[awayScoreIdx];
+        const spreadStr = cols[spreadIdx];
+
+        const home = ABBR_TO_NAME[homeAbbr] || homeAbbr;
+        const away = ABBR_TO_NAME[awayAbbr] || awayAbbr;
+        const completed = homeScoreStr !== "" && awayScoreStr !== "" && homeScoreStr != null && awayScoreStr != null;
+        let winner = null;
+        if (completed) {
+          const hs = Number(homeScoreStr);
+          const as = Number(awayScoreStr);
+          if (hs !== as) winner = hs > as ? home : away;
+        }
+        const spread = spreadStr !== "" && spreadStr != null ? Number(spreadStr) : null;
+
+        return {
+          home,
+          away,
+          date: gameDate,
+          game_date: gameDate,
+          completed,
+          winner,
+          spread,
+        };
+      })
+      .filter((g) => g.home && g.away);
+
+    return Response.json({ games });
+  } catch (e) {
+    return Response.json({ error: e.message }, { status: 500 });
   }
-
-  // ESPN's multi-day "dates=RANGE" format has intermittently returned server
-  // errors even for valid, well-formed ranges, while single-day queries keep
-  // working fine. Querying one day at a time and merging the results avoids
-  // relying on that flaky range format at all.
-  const dayStrings = [];
-  for (let i = 0; i < days; i++) {
-    const d = new Date(startDate);
-    d.setUTCDate(d.getUTCDate() + i);
-    dayStrings.push(d.toISOString().slice(0, 10).replace(/-/g, ""));
-  }
-
-  const results = await Promise.all(
-    dayStrings.map(async (dayStr) => {
-      try {
-        const url = `https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?dates=${dayStr}&limit=100`;
-        const res = await fetch(url, { cache: "no-store", headers: ESPN_HEADERS });
-        if (!res.ok) return { dayStr, error: `status ${res.status}` };
-        const json = await res.json();
-        return { dayStr, events: json.events || [] };
-      } catch (e) {
-        return { dayStr, error: e.message };
-      }
-    })
-  );
-
-  const failedDays = results.filter((r) => r.error).map((r) => r.dayStr);
-  const allEvents = results.flatMap((r) => r.events || []);
-
-  const seen = new Set();
-  const uniqueEvents = allEvents.filter((e) => {
-    if (seen.has(e.id)) return false;
-    seen.add(e.id);
-    return true;
-  });
-
-  const games = uniqueEvents.map(mapEvent).filter((g) => g.home && g.away);
-
-  if (games.length === 0 && failedDays.length === dayStrings.length) {
-    return Response.json(
-      { error: `ESPN failed for every date in range (${dayStrings.join(", ")})` },
-      { status: 502 }
-    );
-  }
-
-  return Response.json({
-    games,
-    ...(failedDays.length > 0 ? { partialFailureDays: failedDays } : {}),
-  });
 }
