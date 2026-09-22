@@ -193,6 +193,11 @@ function GamesTab() {
       } else {
         setScheduleGames(json.games);
         if (json.games.length === 0) setScheduleError("No games found in that date range — try adjusting the kickoff date.");
+        else if (json.partialFailureDays) {
+          setScheduleError(
+            `Note: ESPN failed for ${json.partialFailureDays.length} day(s) in this range (${json.partialFailureDays.join(", ")}) — results below may be incomplete.`
+          );
+        }
       }
     } catch (e) {
       setScheduleError("Couldn't reach the schedule service: " + e.message);
@@ -264,10 +269,13 @@ function GamesTab() {
         }
       }
 
+      const partialNote = json.partialFailureDays
+        ? ` (Note: ESPN failed for ${json.partialFailureDays.length} day(s) in this range — some results may be missing.)`
+        : "";
       setResultsMessage(
-        winnersSet === 0 && spreadsUpdated === 0
+        (winnersSet === 0 && spreadsUpdated === 0
           ? "No updates — either nothing's changed, or ESPN doesn't have this week's lines/results posted yet."
-          : `Updated ${spreadsUpdated} spread(s) and filled in ${winnersSet} winner(s).`
+          : `Updated ${spreadsUpdated} spread(s) and filled in ${winnersSet} winner(s).`) + partialNote
       );
     } catch (e) {
       setResultsError("Couldn't reach the schedule service: " + e.message);
