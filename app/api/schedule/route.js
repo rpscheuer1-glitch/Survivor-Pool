@@ -41,7 +41,16 @@ export async function GET(request) {
     const url = `https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?dates=${datesParam}&limit=100`;
     const res = await fetch(url, { cache: "no-store" });
     if (!res.ok) {
-      return Response.json({ error: `ESPN returned ${res.status}` }, { status: 502 });
+      let bodySnippet = "";
+      try {
+        bodySnippet = (await res.text()).slice(0, 300);
+      } catch {
+        // ignore -- body wasn't readable, we'll just report the status and range
+      }
+      return Response.json(
+        { error: `ESPN returned ${res.status} for dates=${datesParam}${bodySnippet ? ` — ${bodySnippet}` : ""}` },
+        { status: 502 }
+      );
     }
     const json = await res.json();
     const games = (json.events || [])
