@@ -39,7 +39,7 @@ export default function Dashboard() {
       .order("created_at", { ascending: true });
     setEntries(entryRows || []);
 
-    const weekRows = await fetchAllRows("weeks");
+    const weekRows = await fetchAllRows("weeks", "*", "week");
     const fbw = {};
     const lockSettingsByWeek = {};
     (weekRows || []).forEach((w) => {

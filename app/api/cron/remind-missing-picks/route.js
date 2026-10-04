@@ -14,7 +14,7 @@ export async function GET(request) {
 
   const entries = await fetchAllRows("entries");
   const gameRows = await fetchAllRows("games");
-  const weekRows = await fetchAllRows("weeks");
+  const weekRows = await fetchAllRows("weeks", "*", "week");
   const pickRows = await fetchAllRows("picks");
 
   const finalByWeek = {};

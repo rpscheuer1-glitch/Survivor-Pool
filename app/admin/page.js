@@ -253,7 +253,7 @@ function GamesTab() {
     try {
       const allEntries = await fetchAllRows("entries");
       const allGames = await fetchAllRows("games");
-      const allWeeks = await fetchAllRows("weeks");
+      const allWeeks = await fetchAllRows("weeks", "*", "week");
       const allPicks = await fetchAllRows("picks");
 
       const finalByWeek = {};
@@ -757,7 +757,7 @@ function EmailTab() {
     setLoading(true);
     const entries = await fetchAllRows("entries");
     const gameRows = await fetchAllRows("games");
-    const weekRows = await fetchAllRows("weeks");
+    const weekRows = await fetchAllRows("weeks", "*", "week");
     const pickRows = await fetchAllRows("picks");
 
     const finalByWeek = {};
@@ -960,7 +960,7 @@ function ManagePicksTab() {
     // eliminated in an earlier week -- both can show "no pick" for the
     // current week, so this is the only way to tell them apart.
     const allGameRows = await fetchAllRows("games");
-    const allWeekRows = await fetchAllRows("weeks");
+    const allWeekRows = await fetchAllRows("weeks", "*", "week");
     const allPickRows = await fetchAllRows("picks");
 
     const finalByWeek = {};

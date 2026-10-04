@@ -20,7 +20,7 @@ export default function Standings() {
     (async () => {
       const entries = await fetchAllRows("entries");
       const gameRows = await fetchAllRows("games");
-      const weekRows = await fetchAllRows("weeks");
+      const weekRows = await fetchAllRows("weeks", "*", "week");
       const pickRows = await fetchAllRows("picks");
 
       const finalByWeek = {};
