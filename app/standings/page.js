@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { supabase } from "../../lib/supabaseClient";
+import { fetchAllRows } from "../../lib/supabaseClient";
 import { computeStatus, isLocked, computeAutoCurrentWeek } from "../../lib/poolLogic";
 import { abbr } from "../../lib/teams";
 
@@ -18,10 +18,10 @@ export default function Standings() {
 
   useEffect(() => {
     (async () => {
-      const { data: entries } = await supabase.from("entries").select("*");
-      const { data: gameRows } = await supabase.from("games").select("*");
-      const { data: weekRows } = await supabase.from("weeks").select("*");
-      const { data: pickRows } = await supabase.from("picks").select("*");
+      const entries = await fetchAllRows("entries");
+      const gameRows = await fetchAllRows("games");
+      const weekRows = await fetchAllRows("weeks");
+      const pickRows = await fetchAllRows("picks");
 
       const finalByWeek = {};
       const lockSettingsByWeek = {};

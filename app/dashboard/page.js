@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "../../lib/supabaseClient";
+import { supabase, fetchAllRows } from "../../lib/supabaseClient";
 import { useAuth } from "../../lib/useAuth";
 import { ineligible, ruleLabel, computeStatus, MAX_ENTRIES_PER_ACCOUNT, isLocked, formatGameDate, formatLockLabel, computeAutoCurrentWeek } from "../../lib/poolLogic";
 import { abbr } from "../../lib/teams";
@@ -39,7 +39,7 @@ export default function Dashboard() {
       .order("created_at", { ascending: true });
     setEntries(entryRows || []);
 
-    const { data: weekRows } = await supabase.from("weeks").select("*");
+    const weekRows = await fetchAllRows("weeks");
     const fbw = {};
     const lockSettingsByWeek = {};
     (weekRows || []).forEach((w) => {
@@ -48,7 +48,7 @@ export default function Dashboard() {
     });
     setFinalByWeek(fbw);
 
-    const { data: gameRows } = await supabase.from("games").select("*");
+    const gameRows = await fetchAllRows("games");
     const gbw = {};
     (gameRows || []).forEach((g) => {
       const settings = lockSettingsByWeek[g.week] || {};

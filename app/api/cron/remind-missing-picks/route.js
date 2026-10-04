@@ -1,4 +1,4 @@
-import { supabase } from "../../../../lib/supabaseClient";
+import { fetchAllRows } from "../../../../lib/supabaseClient";
 import { computeStatus, computeAutoCurrentWeek, hasUpcomingDeadlineSoon } from "../../../../lib/poolLogic";
 import { sendBulkEmail } from "../../../../lib/serverEmail";
 
@@ -12,10 +12,10 @@ export async function GET(request) {
     return new Response("Unauthorized", { status: 401 });
   }
 
-  const { data: entries } = await supabase.from("entries").select("*");
-  const { data: gameRows } = await supabase.from("games").select("*");
-  const { data: weekRows } = await supabase.from("weeks").select("*");
-  const { data: pickRows } = await supabase.from("picks").select("*");
+  const entries = await fetchAllRows("entries");
+  const gameRows = await fetchAllRows("games");
+  const weekRows = await fetchAllRows("weeks");
+  const pickRows = await fetchAllRows("picks");
 
   const finalByWeek = {};
   const lockSettingsByWeek = {};

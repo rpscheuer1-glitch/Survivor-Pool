@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "../../lib/supabaseClient";
+import { supabase, fetchAllRows } from "../../lib/supabaseClient";
 import { useAuth } from "../../lib/useAuth";
 import { ruleLabel, spreadLabel, computeStatus, computeFallbackPick, weekFullyLocked, computeAutoCurrentWeek, isLocked } from "../../lib/poolLogic";
 import { TEAMS } from "../../lib/teams";
@@ -92,7 +92,7 @@ function GamesTab() {
     const sorted = (gameRows || []).slice().sort((a, b) => (a.game_date || "9999-99-99").localeCompare(b.game_date || "9999-99-99"));
     setGames(sorted);
 
-    const { data: allGameRows } = await supabase.from("games").select("*");
+    const allGameRows = await fetchAllRows("games");
     const gbw = {};
     (allGameRows || []).forEach((g) => {
       gbw[g.week] = gbw[g.week] || [];
@@ -251,10 +251,10 @@ function GamesTab() {
     setLockInResult(null);
     setLockInError("");
     try {
-      const { data: allEntries } = await supabase.from("entries").select("*");
-      const { data: allGames } = await supabase.from("games").select("*");
-      const { data: allWeeks } = await supabase.from("weeks").select("*");
-      const { data: allPicks } = await supabase.from("picks").select("*");
+      const allEntries = await fetchAllRows("entries");
+      const allGames = await fetchAllRows("games");
+      const allWeeks = await fetchAllRows("weeks");
+      const allPicks = await fetchAllRows("picks");
 
       const finalByWeek = {};
       const lockSettingsByWeek = {};
@@ -598,7 +598,7 @@ function RosterTab() {
 
   useEffect(() => {
     (async () => {
-      const { data: profiles } = await supabase.from("profiles").select("*").order("display_name");
+      const profiles = (await fetchAllRows("profiles")).sort((a, b) => (a.display_name || "").localeCompare(b.display_name || ""));
       const { data: entries } = await supabase.from("entries").select("id,user_id");
       const countByUser = {};
       (entries || []).forEach((e) => { countByUser[e.user_id] = (countByUser[e.user_id] || 0) + 1; });
@@ -744,7 +744,7 @@ function EmailTab() {
 
   useEffect(() => {
     (async () => {
-      const { data: gameRows } = await supabase.from("games").select("*");
+      const gameRows = await fetchAllRows("games");
       const gbw = {};
       (gameRows || []).forEach((g) => { gbw[g.week] = gbw[g.week] || []; gbw[g.week].push(g); });
       setWeek(computeAutoCurrentWeek(gbw));
@@ -755,10 +755,10 @@ function EmailTab() {
 
   const loadMissing = useCallback(async (wk) => {
     setLoading(true);
-    const { data: entries } = await supabase.from("entries").select("*");
-    const { data: gameRows } = await supabase.from("games").select("*");
-    const { data: weekRows } = await supabase.from("weeks").select("*");
-    const { data: pickRows } = await supabase.from("picks").select("*");
+    const entries = await fetchAllRows("entries");
+    const gameRows = await fetchAllRows("games");
+    const weekRows = await fetchAllRows("weeks");
+    const pickRows = await fetchAllRows("picks");
 
     const finalByWeek = {};
     const lockSettingsByWeek = {};
@@ -926,7 +926,7 @@ function ManagePicksTab() {
 
   useEffect(() => {
     (async () => {
-      const { data: gameRows } = await supabase.from("games").select("*");
+      const gameRows = await fetchAllRows("games");
       const gbw = {};
       (gameRows || []).forEach((g) => { gbw[g.week] = gbw[g.week] || []; gbw[g.week].push(g); });
       setWeek(computeAutoCurrentWeek(gbw));
@@ -935,7 +935,7 @@ function ManagePicksTab() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const { data: entryRows } = await supabase.from("entries").select("*").order("email");
+    const entryRows = (await fetchAllRows("entries")).sort((a, b) => (a.email || "").localeCompare(b.email || ""));
     setEntries(entryRows || []);
 
     const { data: weekRow } = await supabase.from("weeks").select("*").eq("week", week).maybeSingle();
@@ -959,9 +959,9 @@ function ManagePicksTab() {
     // Full-season data, needed to tell alive entries apart from ones already
     // eliminated in an earlier week -- both can show "no pick" for the
     // current week, so this is the only way to tell them apart.
-    const { data: allGameRows } = await supabase.from("games").select("*");
-    const { data: allWeekRows } = await supabase.from("weeks").select("*");
-    const { data: allPickRows } = await supabase.from("picks").select("*");
+    const allGameRows = await fetchAllRows("games");
+    const allWeekRows = await fetchAllRows("weeks");
+    const allPickRows = await fetchAllRows("picks");
 
     const finalByWeek = {};
     const lockSettingsByWeek = {};
