@@ -65,6 +65,7 @@ function GamesTab() {
   const [scheduleGames, setScheduleGames] = useState([]);
   const [scheduleLoading, setScheduleLoading] = useState(false);
   const [scheduleError, setScheduleError] = useState("");
+  const [addingAll, setAddingAll] = useState(false);
 
   const [resultsLoading, setResultsLoading] = useState(false);
   const [resultsMessage, setResultsMessage] = useState("");
@@ -170,13 +171,29 @@ function GamesTab() {
     setScheduleLoading(false);
   };
 
+  // A synced matchup already in this week (e.g. "Add all" clicked twice).
+  const alreadyAdded = (g) => games.some((x) => x.home === g.home && x.away === g.away);
+
+  const addScheduleGame = async (g) => {
+    if (alreadyAdded(g)) {
+      setScheduleError(`${g.away} @ ${g.home} is already in week ${editWeek}.`);
+      return;
+    }
+    await addGame({ home: g.home, away: g.away, game_date: g.game_date, kickoff: g.kickoff ?? null, spread: g.spread ?? 0 });
+  };
+
   const addAllScheduleGames = async () => {
+    setAddingAll(true);
+    const toAdd = scheduleGames.filter((g) => !alreadyAdded(g));
     await Promise.all(
-      scheduleGames.map((g) =>
+      toAdd.map((g) =>
         addGame({ home: g.home, away: g.away, game_date: g.game_date, kickoff: g.kickoff ?? null, spread: g.spread ?? 0 })
       )
     );
+    const skipped = scheduleGames.length - toAdd.length;
+    setScheduleError(skipped > 0 ? `Skipped ${skipped} game(s) already in week ${editWeek}.` : "");
     setScheduleGames([]);
+    setAddingAll(false);
   };
 
   const fetchResultsAndOdds = async () => {
@@ -195,6 +212,7 @@ function GamesTab() {
       let winnersSet = 0;
       let spreadsUpdated = 0;
       let kickoffsUpdated = 0;
+      let spreadsFrozen = 0;
 
       for (const g of games) {
         const match = (json.games || []).find(
@@ -206,8 +224,13 @@ function GamesTab() {
         if (!g.winner && match.completed && match.winner) {
           patch.winner = match.winner;
         }
+        // Spreads freeze once a game locks: changing one afterwards could
+        // retroactively change which games were off the board or who the
+        // "biggest favorite" auto-pick was. (Manual edits below still work.)
+        const lockedNow = isLocked({ ...g, weekend_lock_day: weekendLockDay, weekend_lock_time: weekendLockTime });
         if (match.spread != null && Number(match.spread) !== Number(g.spread)) {
-          patch.spread = match.spread;
+          if (lockedNow) spreadsFrozen += 1;
+          else patch.spread = match.spread;
         }
         // Backfill/refresh kickoff so early games lock at their actual start.
         if (match.kickoff && (!g.kickoff || new Date(g.kickoff).getTime() !== new Date(match.kickoff).getTime())) {
@@ -222,9 +245,10 @@ function GamesTab() {
       }
 
       setResultsMessage(
-        winnersSet === 0 && spreadsUpdated === 0 && kickoffsUpdated === 0
+        (winnersSet === 0 && spreadsUpdated === 0 && kickoffsUpdated === 0
           ? "No updates — either nothing's changed, or the source doesn't have this week's lines/results posted yet."
-          : `Updated ${spreadsUpdated} spread(s), ${kickoffsUpdated} kickoff time(s), and filled in ${winnersSet} winner(s).`
+          : `Updated ${spreadsUpdated} spread(s), ${kickoffsUpdated} kickoff time(s), and filled in ${winnersSet} winner(s).`) +
+          (spreadsFrozen > 0 ? ` Left ${spreadsFrozen} spread(s) unchanged because those games have already locked.` : "")
       );
     } catch (e) {
       setResultsError("Couldn't reach the schedule service: " + e.message);
@@ -452,8 +476,8 @@ function GamesTab() {
         {scheduleError && <p className="text-rust text-sm mb-2">{scheduleError}</p>}
         {scheduleGames.length > 0 && (
           <div className="grid gap-2">
-            <button className="btn-primary w-fit mb-2" onClick={addAllScheduleGames}>
-              Add all {scheduleGames.length} games to week {editWeek}
+            <button className="btn-primary w-fit mb-2" onClick={addAllScheduleGames} disabled={addingAll}>
+              {addingAll ? "Adding…" : `Add all ${scheduleGames.length} games to week ${editWeek}`}
             </button>
             {scheduleGames.map((g, i) => (
               <div key={i} className="flex items-center gap-3 flex-wrap text-sm border-t border-turfline pt-2">
@@ -462,7 +486,7 @@ function GamesTab() {
                   {g.game_date && <span className="text-chalk/40 text-xs"> — {g.game_date}</span>}
                   {g.spread != null && <span className="text-chalk/40 text-xs"> — spread {g.spread}</span>}
                 </span>
-                <button className="btn-ghost" onClick={() => addGame({ home: g.home, away: g.away, game_date: g.game_date, kickoff: g.kickoff ?? null, spread: g.spread ?? 0 })}>
+                <button className="btn-ghost" onClick={() => addScheduleGame(g)}>
                   Add to week {editWeek}
                 </button>
               </div>
@@ -544,7 +568,7 @@ function GamesTab() {
             {resultsLoading ? "Checking…" : "Sync results & odds"}
           </button>
           <span className="text-xs text-chalk/50">
-            Fills in winners for finished games and refreshes spreads for existing games in this week — only for games already added below.
+            Fills in winners for finished games and refreshes spreads for existing games in this week — only for games already added below. Spreads stop updating once a game locks.
           </span>
         </div>
         {resultsError && <p className="text-rust text-sm mb-3">{resultsError}</p>}
