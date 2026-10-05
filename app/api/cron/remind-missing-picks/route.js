@@ -1,4 +1,5 @@
 import { fetchAllRows } from "../../../../lib/supabaseClient";
+import { getServiceClient } from "../../../../lib/supabaseAdmin";
 import { computeStatus, computeAutoCurrentWeek, hasUpcomingDeadlineSoon } from "../../../../lib/poolLogic";
 import { sendBulkEmail } from "../../../../lib/serverEmail";
 
@@ -12,10 +13,22 @@ export async function GET(request) {
     return new Response("Unauthorized", { status: 401 });
   }
 
-  const entries = await fetchAllRows("entries");
-  const gameRows = await fetchAllRows("games");
-  const weekRows = await fetchAllRows("weeks", "*", "week");
-  const pickRows = await fetchAllRows("picks");
+  // Reading everyone's entries and picks needs the service-role key now that
+  // those tables are no longer public. If it's missing we must NOT carry on:
+  // with partial data everyone would look like they hadn't picked and the
+  // whole pool would get nagged.
+  const db = getServiceClient();
+  if (!db) {
+    return Response.json(
+      { error: "SUPABASE_SERVICE_ROLE_KEY is not set in this deployment; no reminders were sent." },
+      { status: 500 }
+    );
+  }
+
+  const entries = await fetchAllRows("entries", "*", "created_at", db);
+  const gameRows = await fetchAllRows("games", "*", "created_at", db);
+  const weekRows = await fetchAllRows("weeks", "*", "week", db);
+  const pickRows = await fetchAllRows("picks", "*", "created_at", db);
 
   const finalByWeek = {};
   const lockSettingsByWeek = {};

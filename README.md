@@ -122,6 +122,8 @@ that rate limit again.
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
    - `GMAIL_USER`, `GMAIL_APP_PASSWORD`, `GMAIL_FROM_NAME` (for email)
    - `CRON_SECRET` (for the automated reminder below)
+   - `SUPABASE_SERVICE_ROLE_KEY` (the "service_role" key from Supabase's API
+     settings; server-only, lets the reminder job read all picks)
    - `NEXT_PUBLIC_SITE_URL` — set this to your real Vercel URL once you know
      it (e.g. `https://survivor-pool.vercel.app`). It's fine to deploy once
      first to get that URL, then come back and add/update this variable and
@@ -184,3 +186,15 @@ files are kept for reference but you shouldn't need them going forward.)
   one), you can add that under Vercel's project settings once you own the
   domain — that part costs whatever your domain registrar charges, separate
   from Vercel/Supabase hosting itself.
+
+## Access rules and the 2-step lockdown
+
+By default the picks and entries tables can be read by anyone with the site's
+public key. To close that: (1) run `supabase/security_step1_views.sql` (or
+just `sync_schema.sql`, which includes it), (2) set `SUPABASE_SERVICE_ROLE_KEY`
+in Vercel and deploy, check the Weekly Summary still loads, then (3) run
+`supabase/security_step2_lockdown.sql`. After that, people can only read their
+own entries/picks, nobody can change a pick for a locked game by calling the
+API directly, and the public Weekly Summary only gets names and already-locked
+picks. `supabase/security_rollback.sql` undoes step 3. Re-running
+`sync_schema.sql` afterwards does not undo the lockdown.

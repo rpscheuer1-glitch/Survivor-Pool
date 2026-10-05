@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { fetchAllRows } from "../../lib/supabaseClient";
-import { computeStatus, isLocked, computeAutoCurrentWeek } from "../../lib/poolLogic";
+import { computeStatus, isLocked, computeAutoCurrentWeek, weekFullyLocked } from "../../lib/poolLogic";
 import { abbr } from "../../lib/teams";
 
 function Pill({ tone = "gray", children }) {
@@ -18,10 +18,12 @@ export default function Standings() {
 
   useEffect(() => {
     (async () => {
-      const entries = await fetchAllRows("entries");
-      const gameRows = await fetchAllRows("games");
+      // Names only (no emails) and only picks whose game has locked -- the database
+      // enforces this, so nothing hidden is ever downloaded to the browser.
+      const entries = await fetchAllRows("public_entries", "*", "id");
+      const gameRows = await fetchAllRows("games", "*", "created_at");
       const weekRows = await fetchAllRows("weeks", "*", "week");
-      const pickRows = await fetchAllRows("picks");
+      const pickRows = await fetchAllRows("revealed_picks", "*", "id");
 
       const finalByWeek = {};
       const lockSettingsByWeek = {};
@@ -99,7 +101,6 @@ export default function Standings() {
             }
             return {
               label: s.entry.label,
-              email: s.entry.email,
               hasPick: !!pick,
               revealed,
               pick: revealed ? pick : null,
@@ -115,6 +116,7 @@ export default function Standings() {
           rows,
           noPick,
           isFinal: !!finalByWeek[wk],
+          fullyLocked: weekFullyLocked(wk, gamesByWeek),
           entryPicks,
         };
       }).filter((w) => w.week <= computeAutoCurrentWeek(gamesByWeek));
@@ -166,7 +168,7 @@ function WeekCard({ w, isOpenByDefault }) {
 
   const filteredEntryPicks = w.entryPicks.filter((e) => {
     const q = search.toLowerCase();
-    return !q || (e.label || "").toLowerCase().includes(q) || (e.email || "").toLowerCase().includes(q);
+    return !q || (e.label || "").toLowerCase().includes(q);
   });
 
   return (
@@ -205,7 +207,7 @@ function WeekCard({ w, isOpenByDefault }) {
               </div>
             );
           })}
-          {w.noPick > 0 && (
+          {w.noPick > 0 && w.fullyLocked && (
             <div className="flex items-center gap-3 text-sm border-t border-turfline pt-2 mt-1">
               <span className="w-11 flex-shrink-0" />
               <span className="w-40 flex-shrink-0 text-chalk/60">No pick submitted</span>
@@ -217,8 +219,8 @@ function WeekCard({ w, isOpenByDefault }) {
               </span>
             </div>
           )}
-          {w.rows.length === 0 && w.noPick === 0 && (
-            <p className="text-chalk/50 text-sm">No picks submitted yet.</p>
+          {w.rows.length === 0 && (w.noPick === 0 || !w.fullyLocked) && (
+            <p className="text-chalk/50 text-sm">{w.fullyLocked ? "No picks submitted." : "Picks appear here as each game locks."}</p>
           )}
         </div>
 
@@ -229,7 +231,7 @@ function WeekCard({ w, isOpenByDefault }) {
         {showIndividual && (
           <div className="mt-3">
             <input
-              placeholder="Search by name or email…"
+              placeholder="Search by name…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="max-w-sm mb-3"
@@ -248,7 +250,6 @@ function WeekCard({ w, isOpenByDefault }) {
                     <tr key={i} className="border-t border-turfline">
                       <td className="py-2 px-2">
                         <div className="font-bold">{e.label}</div>
-                        <div className="text-xs text-chalk/50">{e.email}</div>
                       </td>
                       <td className="py-2 px-2">
                         {e.hasPick && !e.revealed ? (
@@ -267,7 +268,7 @@ function WeekCard({ w, isOpenByDefault }) {
                         {e.result === "loss" && <Pill tone="red">Loss</Pill>}
                         {e.hasPick && e.revealed && !e.result && <Pill tone="amber">Pending</Pill>}
                         {e.hasPick && !e.revealed && <Pill tone="gray">Locked soon</Pill>}
-                        {!e.hasPick && <Pill tone="red">No pick</Pill>}
+                        {!e.hasPick && (w.fullyLocked ? <Pill tone="red">No pick</Pill> : <Pill tone="gray">Not shown yet</Pill>)}
                       </td>
                     </tr>
                   ))}

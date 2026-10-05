@@ -48,7 +48,7 @@ export default function Dashboard() {
     });
     setFinalByWeek(fbw);
 
-    const gameRows = await fetchAllRows("games");
+    const gameRows = await fetchAllRows("games", "*", "created_at");
     const gbw = {};
     (gameRows || []).forEach((g) => {
       const settings = lockSettingsByWeek[g.week] || {};
@@ -260,6 +260,54 @@ function EntryDetail({ entry, picks, gamesByWeek, finalByWeek, currentWeek, week
     }
   }, [openWeeks.join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // A tapped team looks identical on screen whether or not it has been saved,
+  // so track every week where the highlighted team differs from what's
+  // actually on file, and warn before the person leaves with one pending.
+  const unsavedWeeks = Object.keys(stagedPicks)
+    .map(Number)
+    .filter((w) => stagedPicks[w] && stagedPicks[w] !== (picks[w]?.team || null));
+  const hasUnsaved = unsavedWeeks.length > 0;
+  const LEAVE_WARNING = "You picked a team but haven't saved it yet. Leave without saving?";
+
+  useEffect(() => {
+    if (!hasUnsaved) return undefined;
+
+    // Closing the tab, reloading, or typing a new address.
+    const onBeforeUnload = (e) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    // Tapping any link inside the site (Rules, Weekly Summary, etc.), which
+    // doesn't trigger a real page unload.
+    const onLinkClick = (e) => {
+      const a = e.target && e.target.closest ? e.target.closest("a[href]") : null;
+      if (!a || a.target === "_blank") return;
+      const href = a.getAttribute("href") || "";
+      if (!href || href.startsWith("#")) return;
+      try {
+        if (new URL(a.href, window.location.href).pathname === window.location.pathname) return;
+      } catch (err) {
+        return;
+      }
+      if (!window.confirm(LEAVE_WARNING)) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+
+    window.addEventListener("beforeunload", onBeforeUnload);
+    document.addEventListener("click", onLinkClick, true);
+    return () => {
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      document.removeEventListener("click", onLinkClick, true);
+    };
+  }, [hasUnsaved]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleBack = () => {
+    if (hasUnsaved && !window.confirm(LEAVE_WARNING)) return;
+    onBack();
+  };
+
   const handleSubmit = async (wk, team) => {
     if (!team) return;
     await submitPick(entry.id, wk, team);
@@ -283,7 +331,28 @@ function EntryDetail({ entry, picks, gamesByWeek, finalByWeek, currentWeek, week
 
   return (
     <div>
-      <button className="btn-ghost mb-4" onClick={onBack}>← Back to entries</button>
+      {hasUnsaved && (
+        <div
+          className="sticky top-0 z-20 mb-4 rounded-lg px-4 py-3 grid gap-2"
+          style={{ background: "#F2661A", color: "#141B22", boxShadow: "0 4px 14px rgba(0,0,0,0.45)" }}
+        >
+          {unsavedWeeks.map((w) => (
+            <div key={w} className="flex items-center justify-between gap-3 flex-wrap">
+              <span className="text-sm font-black">
+                Week {w}: {stagedPicks[w]} — NOT SAVED YET
+              </span>
+              <button
+                className="rounded-md px-4 py-2 text-sm font-black"
+                style={{ background: "#141B22", color: "#EDEFF2" }}
+                onClick={() => handleSubmit(w, stagedPicks[w])}
+              >
+                Save pick
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <button className="btn-ghost mb-4" onClick={handleBack}>← Back to entries</button>
       <div className="flex items-center gap-3 mb-6 flex-wrap">
         {editingName ? (
           <>
@@ -337,7 +406,17 @@ function EntryDetail({ entry, picks, gamesByWeek, finalByWeek, currentWeek, week
                 </select>
               )}
             </div>
-            <p className="text-xs text-chalk/50 mb-3">{ruleLabel(wk)}</p>
+            <p className="text-xs text-chalk/50 mb-2">{ruleLabel(wk)}</p>
+            <div className="text-sm mb-3">
+              {submittedPick ? (
+                <span className="text-leaf font-bold">
+                  Saved pick: {submittedPick}
+                  {picks[wk]?.auto ? " (auto-assigned by the site, not chosen by you)" : ""}
+                </span>
+              ) : (
+                <span className="text-amber font-bold">No pick saved yet for week {wk}</span>
+              )}
+            </div>
 
             {pickLockedIn ? (
               <div className="border border-turfline rounded-lg px-4 py-3">
@@ -417,7 +496,7 @@ function EntryDetail({ entry, picks, gamesByWeek, finalByWeek, currentWeek, week
                   )}
                   {justSavedWeek === wk && <span className="text-leaf text-sm">Saved.</span>}
                   {stagedPick && stagedPick !== submittedPick && justSavedWeek !== wk && (
-                    <span className="text-xs text-chalk/50">Not saved yet — click to confirm.</span>
+                    <span className="text-xs font-bold text-amber">Not saved yet — tap {submittedPick ? "Update pick" : "Submit pick"} to save.</span>
                   )}
                 </div>
               </>

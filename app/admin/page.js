@@ -92,7 +92,7 @@ function GamesTab() {
     const sorted = (gameRows || []).slice().sort((a, b) => (a.game_date || "9999-99-99").localeCompare(b.game_date || "9999-99-99"));
     setGames(sorted);
 
-    const allGameRows = await fetchAllRows("games");
+    const allGameRows = await fetchAllRows("games", "*", "created_at");
     const gbw = {};
     (allGameRows || []).forEach((g) => {
       gbw[g.week] = gbw[g.week] || [];
@@ -251,10 +251,10 @@ function GamesTab() {
     setLockInResult(null);
     setLockInError("");
     try {
-      const allEntries = await fetchAllRows("entries");
-      const allGames = await fetchAllRows("games");
+      const allEntries = await fetchAllRows("entries", "*", "created_at");
+      const allGames = await fetchAllRows("games", "*", "created_at");
       const allWeeks = await fetchAllRows("weeks", "*", "week");
-      const allPicks = await fetchAllRows("picks");
+      const allPicks = await fetchAllRows("picks", "*", "created_at");
 
       const finalByWeek = {};
       const lockSettingsByWeek = {};
@@ -744,7 +744,7 @@ function EmailTab() {
 
   useEffect(() => {
     (async () => {
-      const gameRows = await fetchAllRows("games");
+      const gameRows = await fetchAllRows("games", "*", "created_at");
       const gbw = {};
       (gameRows || []).forEach((g) => { gbw[g.week] = gbw[g.week] || []; gbw[g.week].push(g); });
       setWeek(computeAutoCurrentWeek(gbw));
@@ -755,10 +755,10 @@ function EmailTab() {
 
   const loadMissing = useCallback(async (wk) => {
     setLoading(true);
-    const entries = await fetchAllRows("entries");
-    const gameRows = await fetchAllRows("games");
+    const entries = await fetchAllRows("entries", "*", "created_at");
+    const gameRows = await fetchAllRows("games", "*", "created_at");
     const weekRows = await fetchAllRows("weeks", "*", "week");
-    const pickRows = await fetchAllRows("picks");
+    const pickRows = await fetchAllRows("picks", "*", "created_at");
 
     const finalByWeek = {};
     const lockSettingsByWeek = {};
@@ -815,9 +815,12 @@ function EmailTab() {
     setError("");
     const recipients = mode === "remind" ? missingEmails : allEmails;
     try {
+      // The server only accepts this from a logged-in admin, so send our login token.
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData?.session?.access_token || "";
       const res = await fetch("/api/send-email", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ subject, message, recipients }),
       });
       const json = await res.json();
@@ -923,10 +926,41 @@ function ManagePicksTab() {
   const [savedIds, setSavedIds] = useState({});
   const [statusByEntry, setStatusByEntry] = useState({}); // entry_id -> computeStatus result
   const [onlyAlive, setOnlyAlive] = useState(true);
+  const [openHistoryId, setOpenHistoryId] = useState(null);
+  const [historyRows, setHistoryRows] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [profileNames, setProfileNames] = useState({}); // user id -> email, for labeling who changed a pick
+
+  const toggleHistory = async (entry) => {
+    if (openHistoryId === entry.id) {
+      setOpenHistoryId(null);
+      return;
+    }
+    setOpenHistoryId(entry.id);
+    setHistoryLoading(true);
+    const { data: rows } = await supabase
+      .from("pick_history")
+      .select("*")
+      .eq("entry_id", entry.id)
+      .eq("week", week)
+      .order("changed_at", { ascending: true });
+
+    const changerIds = [...new Set((rows || []).map((r) => r.changed_by).filter(Boolean))];
+    const unknownIds = changerIds.filter((id) => !profileNames[id]);
+    if (unknownIds.length > 0) {
+      const { data: profs } = await supabase.from("profiles").select("id,email").in("id", unknownIds);
+      const next = { ...profileNames };
+      (profs || []).forEach((p) => { next[p.id] = p.email; });
+      setProfileNames(next);
+    }
+
+    setHistoryRows(rows || []);
+    setHistoryLoading(false);
+  };
 
   useEffect(() => {
     (async () => {
-      const gameRows = await fetchAllRows("games");
+      const gameRows = await fetchAllRows("games", "*", "created_at");
       const gbw = {};
       (gameRows || []).forEach((g) => { gbw[g.week] = gbw[g.week] || []; gbw[g.week].push(g); });
       setWeek(computeAutoCurrentWeek(gbw));
@@ -935,7 +969,7 @@ function ManagePicksTab() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const entryRows = (await fetchAllRows("entries")).sort((a, b) => (a.email || "").localeCompare(b.email || ""));
+    const entryRows = (await fetchAllRows("entries", "*", "created_at")).sort((a, b) => (a.email || "").localeCompare(b.email || ""));
     setEntries(entryRows || []);
 
     const { data: weekRow } = await supabase.from("weeks").select("*").eq("week", week).maybeSingle();
@@ -950,7 +984,7 @@ function ManagePicksTab() {
     if (ids.length > 0) {
       const { data: pickRows } = await supabase.from("picks").select("*").eq("week", week).in("entry_id", ids);
       const p = {};
-      (pickRows || []).forEach((pk) => { p[pk.entry_id] = { team: pk.team, auto: pk.auto_assigned }; });
+      (pickRows || []).forEach((pk) => { p[pk.entry_id] = { team: pk.team, auto: pk.auto_assigned, updatedAt: pk.updated_at }; });
       setPicks(p);
     } else {
       setPicks({});
@@ -959,9 +993,9 @@ function ManagePicksTab() {
     // Full-season data, needed to tell alive entries apart from ones already
     // eliminated in an earlier week -- both can show "no pick" for the
     // current week, so this is the only way to tell them apart.
-    const allGameRows = await fetchAllRows("games");
+    const allGameRows = await fetchAllRows("games", "*", "created_at");
     const allWeekRows = await fetchAllRows("weeks", "*", "week");
-    const allPickRows = await fetchAllRows("picks");
+    const allPickRows = await fetchAllRows("picks", "*", "created_at");
 
     const finalByWeek = {};
     const lockSettingsByWeek = {};
@@ -1102,7 +1136,20 @@ function ManagePicksTab() {
                   </span>
                 )}
                 {revealed && pickInfo?.auto && <span className="text-amber text-xs" title="Set by the lock-in tool, not the participant">(auto)</span>}
+                {revealed && pickInfo?.updatedAt && (
+                  <span className="text-chalk/40 text-xs" title="When this pick was last set or changed">
+                    {new Date(pickInfo.updatedAt).toLocaleString("en-US", {
+                      month: "numeric",
+                      day: "numeric",
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })}
+                  </span>
+                )}
                 {savedIds[entry.id] && <span className="text-leaf text-xs">Saved</span>}
+                <button className="btn-ghost" onClick={() => toggleHistory(entry)}>
+                  {openHistoryId === entry.id ? "Hide history" : "History"}
+                </button>
                 <button
                   className="btn-ghost text-rust border-rust"
                   onClick={() => deleteEntry(entry)}
@@ -1110,6 +1157,35 @@ function ManagePicksTab() {
                 >
                   Delete entry
                 </button>
+                {openHistoryId === entry.id && (
+                  <div className="w-full border-t border-turfline mt-2 pt-2 text-xs">
+                    {historyLoading ? (
+                      <p className="text-chalk/50">Loading history…</p>
+                    ) : historyRows.length === 0 ? (
+                      <p className="text-chalk/50">No recorded changes for this week yet.</p>
+                    ) : (
+                      <div className="grid gap-1">
+                        {historyRows.map((h) => {
+                          const who = !h.changed_by
+                            ? "unknown"
+                            : h.changed_by === entry.user_id
+                            ? "the participant"
+                            : profileNames[h.changed_by] || "another admin";
+                          return (
+                            <div key={h.id} className="text-chalk/60">
+                              {new Date(h.changed_at).toLocaleString("en-US", {
+                                month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit",
+                              })}
+                              {" — "}
+                              {h.old_team ? `${h.old_team} → ${h.new_team}` : `set to ${h.new_team}`}
+                              {h.new_auto_assigned ? " (auto-assigned)" : ` (by ${who})`}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })}
