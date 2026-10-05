@@ -14,7 +14,7 @@
 // also indexed by season+week directly, so there's no more need to guess
 // date ranges at all.
 
-import { wallTimeToUTC } from "../../../lib/poolLogic";
+import { wallTimeToUTC, TIE } from "../../../lib/poolLogic";
 
 const NFLVERSE_GAMES_URL = "https://raw.githubusercontent.com/nflverse/nfldata/master/data/games.csv";
 
@@ -99,7 +99,7 @@ export async function GET(request) {
         if (completed) {
           const hs = Number(homeScoreStr);
           const as = Number(awayScoreStr);
-          if (hs !== as) winner = hs > as ? home : away;
+          winner = hs === as ? TIE : hs > as ? home : away;
         }
         // nflverse's spread_line uses positive = home favored -- the
         // opposite of this app's own convention (negative = home favored,

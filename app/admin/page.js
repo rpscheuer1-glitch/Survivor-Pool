@@ -3,7 +3,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { supabase, fetchAllRows } from "../../lib/supabaseClient";
 import { useAuth } from "../../lib/useAuth";
-import { ruleLabel, spreadLabel, computeStatus, computeFallbackPick, weekFullyLocked, computeAutoCurrentWeek, isLocked } from "../../lib/poolLogic";
+import { ruleLabel, spreadLabel, computeStatus, computeFallbackPick, weekFullyLocked, computeAutoCurrentWeek, isLocked, TIE } from "../../lib/poolLogic";
 import { TEAMS } from "../../lib/teams";
 
 export default function AdminPage() {
@@ -597,6 +597,7 @@ function GamesTab() {
                   <option value="">Winner: TBD</option>
                   <option value={g.away}>{g.away}</option>
                   <option value={g.home}>{g.home}</option>
+                  <option value={TIE}>Tie (both teams lose)</option>
                 </select>
                 <button className="btn-ghost text-rust border-rust" onClick={() => removeGame(g.id)}>Remove</button>
               </div>

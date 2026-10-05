@@ -9,7 +9,8 @@ export default function RulesPage() {
         </li>
         <li>
           <span className="font-bold text-chalk">2.</span> Pick one team to win straight up each week. You can pick
-          the same team as many times as you'd like over the course of the season.
+          the same team as many times as you'd like over the course of the season. A tie counts as a loss, since
+          your team didn't win.
         </li>
         <li>
           <span className="font-bold text-chalk">3.</span> Starting in Week 6, any game with a spread of 10 or more
