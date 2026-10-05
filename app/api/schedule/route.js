@@ -14,6 +14,8 @@
 // also indexed by season+week directly, so there's no more need to guess
 // date ranges at all.
 
+import { wallTimeToUTC } from "../../../lib/poolLogic";
+
 const NFLVERSE_GAMES_URL = "https://raw.githubusercontent.com/nflverse/nfldata/master/data/games.csv";
 
 // nflverse's own team abbreviation convention -- confirmed directly against
@@ -56,6 +58,7 @@ export async function GET(request) {
     const typeIdx = col("game_type");
     const weekIdx = col("week");
     const gamedayIdx = col("gameday");
+    const gametimeIdx = col("gametime");
     const awayIdx = col("away_team");
     const awayScoreIdx = col("away_score");
     const homeIdx = col("home_team");
@@ -78,6 +81,16 @@ export async function GET(request) {
         const homeScoreStr = cols[homeScoreIdx];
         const awayScoreStr = cols[awayScoreIdx];
         const spreadStr = cols[spreadIdx];
+        const gametimeStr = cols[gametimeIdx]; // HH:MM, US Eastern
+
+        // Exact kickoff, so early games (e.g. 9:30 AM ET London games) can
+        // lock at kickoff instead of staying open until the weekend deadline.
+        let kickoff = null;
+        if (/^\d{4}-\d{2}-\d{2}$/.test(gameDate || "") && /^\d{1,2}:\d{2}$/.test(gametimeStr || "")) {
+          const [y, m, d] = gameDate.split("-").map(Number);
+          const [hh, mm] = gametimeStr.split(":").map(Number);
+          kickoff = wallTimeToUTC("America/New_York", y, m, d, hh, mm).toISOString();
+        }
 
         const home = ABBR_TO_NAME[homeAbbr] || homeAbbr;
         const away = ABBR_TO_NAME[awayAbbr] || awayAbbr;
@@ -98,6 +111,7 @@ export async function GET(request) {
           away,
           date: gameDate,
           game_date: gameDate,
+          kickoff,
           completed,
           winner,
           spread,

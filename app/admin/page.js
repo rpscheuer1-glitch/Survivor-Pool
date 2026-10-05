@@ -173,7 +173,7 @@ function GamesTab() {
   const addAllScheduleGames = async () => {
     await Promise.all(
       scheduleGames.map((g) =>
-        addGame({ home: g.home, away: g.away, game_date: g.game_date, spread: g.spread ?? 0 })
+        addGame({ home: g.home, away: g.away, game_date: g.game_date, kickoff: g.kickoff ?? null, spread: g.spread ?? 0 })
       )
     );
     setScheduleGames([]);
@@ -194,6 +194,7 @@ function GamesTab() {
 
       let winnersSet = 0;
       let spreadsUpdated = 0;
+      let kickoffsUpdated = 0;
 
       for (const g of games) {
         const match = (json.games || []).find(
@@ -208,17 +209,22 @@ function GamesTab() {
         if (match.spread != null && Number(match.spread) !== Number(g.spread)) {
           patch.spread = match.spread;
         }
+        // Backfill/refresh kickoff so early games lock at their actual start.
+        if (match.kickoff && (!g.kickoff || new Date(g.kickoff).getTime() !== new Date(match.kickoff).getTime())) {
+          patch.kickoff = match.kickoff;
+        }
         if (Object.keys(patch).length > 0) {
           await updateGame(g.id, patch);
           if (patch.winner) winnersSet += 1;
           if (patch.spread != null) spreadsUpdated += 1;
+          if (patch.kickoff) kickoffsUpdated += 1;
         }
       }
 
       setResultsMessage(
-        winnersSet === 0 && spreadsUpdated === 0
+        winnersSet === 0 && spreadsUpdated === 0 && kickoffsUpdated === 0
           ? "No updates — either nothing's changed, or the source doesn't have this week's lines/results posted yet."
-          : `Updated ${spreadsUpdated} spread(s) and filled in ${winnersSet} winner(s).`
+          : `Updated ${spreadsUpdated} spread(s), ${kickoffsUpdated} kickoff time(s), and filled in ${winnersSet} winner(s).`
       );
     } catch (e) {
       setResultsError("Couldn't reach the schedule service: " + e.message);
@@ -288,8 +294,8 @@ function GamesTab() {
         .filter((w) => w < editWeek)
         .sort((a, b) => a - b);
 
-      let lockedCount = 0;
       const skipped = [];
+      const toInsert = [];
 
       for (const entry of allEntries || []) {
         const entryPicks = picksByEntry[entry.id] || {};
@@ -310,16 +316,31 @@ function GamesTab() {
           continue;
         }
 
-        const { error: insErr } = await supabase
-          .from("picks")
-          .upsert(
-            { entry_id: entry.id, week: editWeek, team: fallback.team, auto_assigned: true },
-            { onConflict: "entry_id,week" }
-          );
-        if (!insErr) lockedCount += 1;
+        toInsert.push({ entry_id: entry.id, week: editWeek, team: fallback.team, auto_assigned: true });
       }
 
-      setLockInResult({ lockedCount, skipped });
+      // ignoreDuplicates = ON CONFLICT DO NOTHING: if someone saved a real
+      // pick after the data above was loaded, it's left alone rather than
+      // overwritten. Only rows actually inserted come back from .select().
+      let lockedCount = 0;
+      let alreadyHadPick = 0;
+      const failures = [];
+      const chunkSize = 500;
+      for (let i = 0; i < toInsert.length; i += chunkSize) {
+        const chunk = toInsert.slice(i, i + chunkSize);
+        const { data: inserted, error: insErr } = await supabase
+          .from("picks")
+          .upsert(chunk, { onConflict: "entry_id,week", ignoreDuplicates: true })
+          .select("id");
+        if (insErr) {
+          failures.push(`${chunk.length} pick(s): ${insErr.message}`);
+          continue;
+        }
+        lockedCount += (inserted || []).length;
+        alreadyHadPick += chunk.length - (inserted || []).length;
+      }
+
+      setLockInResult({ lockedCount, alreadyHadPick, skipped, failures });
       load();
     } catch (e) {
       setLockInError(e.message);
@@ -420,7 +441,7 @@ function GamesTab() {
                   {g.game_date && <span className="text-chalk/40 text-xs"> — {g.game_date}</span>}
                   {g.spread != null && <span className="text-chalk/40 text-xs"> — spread {g.spread}</span>}
                 </span>
-                <button className="btn-ghost" onClick={() => addGame({ home: g.home, away: g.away, game_date: g.game_date, spread: g.spread ?? 0 })}>
+                <button className="btn-ghost" onClick={() => addGame({ home: g.home, away: g.away, game_date: g.game_date, kickoff: g.kickoff ?? null, spread: g.spread ?? 0 })}>
                   Add to week {editWeek}
                 </button>
               </div>
@@ -525,8 +546,15 @@ function GamesTab() {
           {lockInResult && (
             <p className="text-leaf text-sm mt-2">
               Locked in {lockInResult.lockedCount} pick(s) for week {editWeek}.
+              {lockInResult.alreadyHadPick > 0 &&
+                ` ${lockInResult.alreadyHadPick} entr${lockInResult.alreadyHadPick === 1 ? "y" : "ies"} saved a pick of their own while this ran and ${lockInResult.alreadyHadPick === 1 ? "was" : "were"} left alone.`}
               {lockInResult.skipped.length > 0 &&
                 ` Couldn't find a fallback for: ${lockInResult.skipped.join(", ")} (no favorites set on eligible games).`}
+            </p>
+          )}
+          {lockInResult?.failures?.length > 0 && (
+            <p className="text-rust text-sm mt-2">
+              Some picks were NOT saved — run this again: {lockInResult.failures.join("; ")}
             </p>
           )}
         </div>
@@ -558,7 +586,7 @@ function GamesTab() {
                   <input
                     type="date"
                     value={g.game_date || ""}
-                    onChange={(e) => updateGame(g.id, { game_date: e.target.value || null })}
+                    onChange={(e) => updateGame(g.id, { game_date: e.target.value || null, kickoff: null })}
                   />
                 </label>
                 <select
@@ -1030,10 +1058,20 @@ function ManagePicksTab() {
 
   const setPickFor = async (entryId, team) => {
     if (!team) {
-      await supabase.from("picks").delete().eq("entry_id", entryId).eq("week", week);
+      const { error: delErr } = await supabase.from("picks").delete().eq("entry_id", entryId).eq("week", week);
+      if (delErr) {
+        alert("Couldn't clear pick: " + delErr.message);
+        return;
+      }
       setPicks((p) => { const next = { ...p }; delete next[entryId]; return next; });
     } else {
-      await supabase.from("picks").upsert({ entry_id: entryId, week, team, auto_assigned: false }, { onConflict: "entry_id,week" });
+      const { error: upErr } = await supabase
+        .from("picks")
+        .upsert({ entry_id: entryId, week, team, auto_assigned: false }, { onConflict: "entry_id,week" });
+      if (upErr) {
+        alert("Couldn't save pick: " + upErr.message);
+        return;
+      }
       setPicks((p) => ({ ...p, [entryId]: { team, auto: false } }));
     }
     setSavedIds((s) => ({ ...s, [entryId]: true }));

@@ -63,6 +63,7 @@ create table if not exists games (
   winner text,
   favorite text,
   game_date date,
+  kickoff timestamptz,
   created_at timestamptz not null default now()
 );
 
@@ -200,6 +201,32 @@ $$;
 
 create policy "profiles: admin read all" on profiles for select using (is_pool_admin());
 create policy "profiles: admin update all" on profiles for update using (is_pool_admin());
+
+-- Nobody but an admin may change is_admin or payment_note -- including on
+-- their own row, which "profiles: update own" would otherwise allow (letting
+-- any signed-in user make themselves an admin through the public API key).
+-- Changes made from the Supabase dashboard / SQL editor or the service-role
+-- key have no signed-in user (auth.uid() is null) and are still allowed.
+create or replace function public.protect_profile_fields()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is not null and not public.is_pool_admin()
+     and (new.is_admin is distinct from old.is_admin
+          or new.payment_note is distinct from old.payment_note) then
+    raise exception 'Only an admin can change is_admin or payment_note';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists profiles_protect_fields on profiles;
+create trigger profiles_protect_fields
+  before update on profiles
+  for each row execute function public.protect_profile_fields();
 
 alter table pool_settings enable row level security;
 create policy "pool_settings: read all" on pool_settings for select using (true);

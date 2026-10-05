@@ -2,7 +2,9 @@
 -- anything, so it is safe to run at any time, before or after deploying code.
 -- (sync_schema.sql includes this same block, so re-running that also does it.)
 
--- When does a game lock? Mirrors computeLockTime() in lib/poolLogic.js:
+alter table public.games add column if not exists kickoff timestamptz;
+
+-- When is a game's pick deadline? Mirrors computeDeadline() in lib/poolLogic.js:
 --   Wed/Thu/Fri games -> 6:00 PM Central the same day
 --   Sat/Sun/Mon games -> the week's weekend deadline (Saturday or Sunday of
 --                        that Sat/Sun/Mon cluster, at the configured time)
@@ -25,7 +27,9 @@ as $$
   end
 $$;
 
--- Has the game this team plays in this week locked yet?
+-- Has the game this team plays in this week locked yet? A game also locks at
+-- its own kickoff if that comes before the deadline above (e.g. a 9:30 AM ET
+-- London game), mirroring computeLockTime() in lib/poolLogic.js.
 create or replace function public.pick_is_locked(p_week int, p_team text)
 returns boolean
 language sql
@@ -34,17 +38,20 @@ security definer
 set search_path = public
 as $$
   select coalesce(bool_or(
-    now() >= public.game_lock_time(
-      g.game_date,
-      coalesce(w.weekend_lock_day, 'sunday'),
-      coalesce(w.weekend_lock_time, '10:00')
+    now() >= least(
+      g.kickoff,
+      public.game_lock_time(
+        g.game_date,
+        coalesce(w.weekend_lock_day, 'sunday'),
+        coalesce(w.weekend_lock_time, '10:00')
+      )
     )
   ), false)
   from public.games g
   left join public.weeks w on w.week = g.week
   where g.week = p_week
     and (g.home = p_team or g.away = p_team)
-    and g.game_date is not null
+    and (g.game_date is not null or g.kickoff is not null)
 $$;
 
 -- What the public Weekly Summary is allowed to see: entry names only (no

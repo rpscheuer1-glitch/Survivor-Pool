@@ -75,6 +75,9 @@ create table if not exists games (
   game_date date,
   created_at timestamptz not null default now()
 );
+-- Exact kickoff (from the schedule sync). Used so a game that starts before
+-- the weekend deadline locks at kickoff instead.
+alter table games add column if not exists kickoff timestamptz;
 
 -- Entries: up to 5 per account (enforced by trigger below).
 create table if not exists entries (
@@ -205,6 +208,32 @@ stable
 as $$
   select coalesce((select is_admin from profiles where id = auth.uid()), false);
 $$;
+
+-- Nobody but an admin may change is_admin or payment_note -- including on
+-- their own row, which "profiles: update own" would otherwise allow (letting
+-- any signed-in user make themselves an admin through the public API key).
+-- Changes made from the Supabase dashboard / SQL editor or the service-role
+-- key have no signed-in user (auth.uid() is null) and are still allowed.
+create or replace function public.protect_profile_fields()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is not null and not public.is_pool_admin()
+     and (new.is_admin is distinct from old.is_admin
+          or new.payment_note is distinct from old.payment_note) then
+    raise exception 'Only an admin can change is_admin or payment_note';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists profiles_protect_fields on profiles;
+create trigger profiles_protect_fields
+  before update on profiles
+  for each row execute function public.protect_profile_fields();
 
 -- Row Level Security -------------------------------------------------------
 -- Every policy below is wrapped in a DO block that catches "already exists"
@@ -340,7 +369,7 @@ exception when duplicate_object then null; end $$;
 -- anything, so it is safe to run at any time, before or after deploying code.
 -- (sync_schema.sql includes this same block, so re-running that also does it.)
 
--- When does a game lock? Mirrors computeLockTime() in lib/poolLogic.js:
+-- When is a game's pick deadline? Mirrors computeDeadline() in lib/poolLogic.js:
 --   Wed/Thu/Fri games -> 6:00 PM Central the same day
 --   Sat/Sun/Mon games -> the week's weekend deadline (Saturday or Sunday of
 --                        that Sat/Sun/Mon cluster, at the configured time)
@@ -363,7 +392,9 @@ as $$
   end
 $$;
 
--- Has the game this team plays in this week locked yet?
+-- Has the game this team plays in this week locked yet? A game also locks at
+-- its own kickoff if that comes before the deadline above (e.g. a 9:30 AM ET
+-- London game), mirroring computeLockTime() in lib/poolLogic.js.
 create or replace function public.pick_is_locked(p_week int, p_team text)
 returns boolean
 language sql
@@ -372,17 +403,20 @@ security definer
 set search_path = public
 as $$
   select coalesce(bool_or(
-    now() >= public.game_lock_time(
-      g.game_date,
-      coalesce(w.weekend_lock_day, 'sunday'),
-      coalesce(w.weekend_lock_time, '10:00')
+    now() >= least(
+      g.kickoff,
+      public.game_lock_time(
+        g.game_date,
+        coalesce(w.weekend_lock_day, 'sunday'),
+        coalesce(w.weekend_lock_time, '10:00')
+      )
     )
   ), false)
   from public.games g
   left join public.weeks w on w.week = g.week
   where g.week = p_week
     and (g.home = p_team or g.away = p_team)
-    and g.game_date is not null
+    and (g.game_date is not null or g.kickoff is not null)
 $$;
 
 -- What the public Weekly Summary is allowed to see: entry names only (no
