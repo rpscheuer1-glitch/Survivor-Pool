@@ -296,13 +296,19 @@ function GamesTab() {
 
       const skipped = [];
       const toInsert = [];
+      let aliveCount = 0;
+      let withPickCount = 0;
 
       for (const entry of allEntries || []) {
         const entryPicks = picksByEntry[entry.id] || {};
-        if (entryPicks[editWeek]?.team) continue; // already has a real pick this week
-
         const status = computeStatus(entryPicks, gamesByWeek, finalByWeek);
         if (status.eliminated && status.eliminatedWeek < editWeek) continue; // already out before this week
+        aliveCount += 1;
+
+        if (entryPicks[editWeek]?.team) {
+          withPickCount += 1; // already has a pick this week
+          continue;
+        }
 
         let lastPick = null;
         for (const w of priorWeekNums) {
@@ -317,6 +323,21 @@ function GamesTab() {
         }
 
         toInsert.push({ entry_id: entry.id, week: editWeek, team: fallback.team, auto_assigned: true });
+      }
+
+      // Last chance to catch bad data before anything is written: if the
+      // pick data didn't load fully, this number will be far too high.
+      if (toInsert.length > 0) {
+        const proceed = confirm(
+          `Week ${editWeek}: ${withPickCount} of ${aliveCount} entries still alive already have a pick.
+
+` +
+            `This will auto-assign picks to the other ${toInsert.length}.
+
+` +
+            `Does that number look right? If it seems much too high, click Cancel and check the data first.`
+        );
+        if (!proceed) { setLockInBusy(false); return; }
       }
 
       // ignoreDuplicates = ON CONFLICT DO NOTHING: if someone saved a real
@@ -628,7 +649,7 @@ function RosterTab() {
   useEffect(() => {
     (async () => {
       const profiles = (await fetchAllRows("profiles")).sort((a, b) => (a.display_name || "").localeCompare(b.display_name || ""));
-      const { data: entries } = await supabase.from("entries").select("id,user_id");
+      const entries = await fetchAllRows("entries", "id,user_id", "created_at");
       const countByUser = {};
       (entries || []).forEach((e) => { countByUser[e.user_id] = (countByUser[e.user_id] || 0) + 1; });
       setRows((profiles || []).map((p) => ({ ...p, entryCount: countByUser[p.id] || 0 })));
@@ -777,7 +798,7 @@ function EmailTab() {
       const gbw = {};
       (gameRows || []).forEach((g) => { gbw[g.week] = gbw[g.week] || []; gbw[g.week].push(g); });
       setWeek(computeAutoCurrentWeek(gbw));
-      const { data: profiles } = await supabase.from("profiles").select("email");
+      const profiles = await fetchAllRows("profiles", "email");
       setAllEmails(Array.from(new Set((profiles || []).map((p) => p.email).filter(Boolean))));
     })();
   }, []);
@@ -1009,22 +1030,20 @@ function ManagePicksTab() {
     const enrichedGames = (gameRows || []).map((g) => ({ ...g, weekend_lock_day: lockDay, weekend_lock_time: lockTime }));
     setGames(enrichedGames);
 
-    const ids = (entryRows || []).map((e) => e.id);
-    if (ids.length > 0) {
-      const { data: pickRows } = await supabase.from("picks").select("*").eq("week", week).in("entry_id", ids);
-      const p = {};
-      (pickRows || []).forEach((pk) => { p[pk.entry_id] = { team: pk.team, auto: pk.auto_assigned, updatedAt: pk.updated_at }; });
-      setPicks(p);
-    } else {
-      setPicks({});
-    }
-
     // Full-season data, needed to tell alive entries apart from ones already
     // eliminated in an earlier week -- both can show "no pick" for the
     // current week, so this is the only way to tell them apart.
     const allGameRows = await fetchAllRows("games", "*", "created_at");
     const allWeekRows = await fetchAllRows("weeks", "*", "week");
     const allPickRows = await fetchAllRows("picks", "*", "created_at");
+
+    // This week's picks come from the same paged, complete fetch -- never a
+    // single query that could be silently cut short.
+    const p = {};
+    allPickRows
+      .filter((pk) => pk.week === week)
+      .forEach((pk) => { p[pk.entry_id] = { team: pk.team, auto: pk.auto_assigned, updatedAt: pk.updated_at }; });
+    setPicks(p);
 
     const finalByWeek = {};
     const lockSettingsByWeek = {};
@@ -1216,7 +1235,11 @@ function ManagePicksTab() {
                                 month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit",
                               })}
                               {" — "}
-                              {h.old_team ? `${h.old_team} → ${h.new_team}` : `set to ${h.new_team}`}
+                              {!h.new_team
+                                ? `cleared (was ${h.old_team})`
+                                : h.old_team
+                                ? `${h.old_team} → ${h.new_team}`
+                                : `set to ${h.new_team}`}
                               {h.new_auto_assigned ? " (auto-assigned)" : ` (by ${who})`}
                             </div>
                           );

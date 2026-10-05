@@ -169,6 +169,14 @@ begin
   elsif (tg_op = 'UPDATE') then
     insert into pick_history (entry_id, week, old_team, new_team, old_auto_assigned, new_auto_assigned, changed_by)
     values (new.entry_id, new.week, old.team, new.team, old.auto_assigned, new.auto_assigned, auth.uid());
+  elsif (tg_op = 'DELETE') then
+    -- A cleared pick (new_team null). Skipped when the whole entry is being
+    -- deleted, since its history goes with it.
+    if exists (select 1 from entries where id = old.entry_id) then
+      insert into pick_history (entry_id, week, old_team, new_team, old_auto_assigned, new_auto_assigned, changed_by)
+      values (old.entry_id, old.week, old.team, null, old.auto_assigned, null, auth.uid());
+    end if;
+    return old;
   end if;
   return new;
 end;
@@ -176,7 +184,7 @@ $$ language plpgsql security definer;
 
 drop trigger if exists picks_log_history on picks;
 create trigger picks_log_history
-after insert or update on picks
+after insert or update or delete on picks
 for each row
 execute function log_pick_history();
 
