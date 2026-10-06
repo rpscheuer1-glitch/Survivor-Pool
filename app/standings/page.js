@@ -182,8 +182,8 @@ function WeekCard({ w, isOpenByDefault }) {
       <div className="px-4 pb-4">
         {!w.isFinal && (
           <p className="text-xs text-amber/80 mb-3">
-            This week isn't marked final yet — wins/losses shown below are accurate, but nobody is officially
-            eliminated until it's finalized in Admin.
+            Losing picks are eliminated as soon as their game is graded. Missing picks are auto-assigned when picks
+            are locked in for the week.
           </p>
         )}
         <div className="grid gap-2 mb-4">

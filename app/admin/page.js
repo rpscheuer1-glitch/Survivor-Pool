@@ -511,7 +511,7 @@ function GamesTab() {
           </div>
         </div>
         <p className="text-xs text-chalk/50 mb-3">
-          {ruleLabel(editWeek)} Marking a week final locks in results: a losing pick eliminates an entry, and a missing pick first tries last week's team (if it's still an option), then the biggest favorite this week — only eliminating if neither is available.
+          {ruleLabel(editWeek)} A losing pick — including one auto-assigned by "Lock in missing picks" — eliminates an entry as soon as its game is graded. Marking a week final only matters for entries still without a pick: it first tries last week's team (if it's still an option), then the biggest favorite this week — only eliminating if neither is available.
         </p>
 
         <div className="border border-turfline rounded-lg p-4 mb-4">
