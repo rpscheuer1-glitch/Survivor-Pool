@@ -5,6 +5,7 @@ import { supabase, fetchAllRows } from "../../lib/supabaseClient";
 import { useAuth } from "../../lib/useAuth";
 import { ineligible, ruleLabel, computeStatus, MAX_ENTRIES_PER_ACCOUNT, isLocked, formatGameDate, formatLockLabel, computeAutoCurrentWeek } from "../../lib/poolLogic";
 import { abbr } from "../../lib/teams";
+import NotificationsCard from "../NotificationsCard";
 
 function Pill({ tone = "gray", children }) {
   return <span className={`pill pill-${tone}`}>{children}</span>;
@@ -152,6 +153,7 @@ export default function Dashboard() {
 
       {!selectedEntry && (
         <>
+          <NotificationsCard />
           <div className="grid gap-2 mb-4">
             {entries.length === 0 && <p className="text-chalk/60 text-sm">No entries yet.</p>}
             {entries.map((entry) => {

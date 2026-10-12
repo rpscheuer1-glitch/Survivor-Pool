@@ -2,6 +2,9 @@ import { fetchAllRows } from "../../../../lib/supabaseClient";
 import { getServiceClient } from "../../../../lib/supabaseAdmin";
 import { computeStatus, computeAutoCurrentWeek, hasUpcomingDeadlineSoon } from "../../../../lib/poolLogic";
 import { sendBulkEmail } from "../../../../lib/serverEmail";
+import { sendPushMessages, pushConfigured } from "../../../../lib/serverPush";
+
+export const maxDuration = 60;
 
 // Triggered by Vercel Cron (see vercel.json) — not meant to be called by a
 // browser. Protected by CRON_SECRET so random requests can't trigger a mass
@@ -65,11 +68,13 @@ export async function GET(request) {
   });
 
   const missingEmails = new Set();
+  const missingUserIds = new Set();
   (entries || []).forEach((e) => {
     const status = computeStatus(picksByEntry[e.id] || {}, gamesByWeek, finalByWeek);
     const alreadyEliminated = status.eliminated && status.eliminatedWeek < week;
     const hasPick = !!(picksByEntry[e.id] && picksByEntry[e.id][week]);
     if (!alreadyEliminated && !hasPick && e.email) missingEmails.add(e.email);
+    if (!alreadyEliminated && !hasPick && e.user_id) missingUserIds.add(e.user_id);
   });
 
   if (missingEmails.size === 0) {
@@ -81,5 +86,19 @@ export async function GET(request) {
   const message = `Hey — just a reminder to get your Week ${week} survivor pick in before games start today.${siteUrl ? ` Pick here: ${siteUrl}/dashboard` : ""}\n\nThanks!`;
 
   const result = await sendBulkEmail({ subject, message, recipients: Array.from(missingEmails) });
-  return Response.json({ week, ...result });
+
+  // Same reminder to the phones of anyone who turned on notifications.
+  const push = pushConfigured()
+    ? await sendPushMessages(
+        db,
+        Array.from(missingUserIds).map((userId) => ({
+          userId,
+          title: `Week ${week} pick still needed`,
+          body: "Get your survivor pick in before games lock today.",
+          url: "/dashboard",
+        }))
+      )
+    : { skipped: "Push not configured." };
+
+  return Response.json({ week, ...result, push });
 }

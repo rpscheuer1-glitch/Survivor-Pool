@@ -19,11 +19,12 @@ export default function AdminPage() {
 
   return (
     <div>
-      <div className="flex gap-2 mb-6 border-b border-turfline">
+      <div className="flex gap-2 mb-6 border-b border-turfline overflow-x-auto">
         {[
           { id: "games", label: "Games & Weeks" },
           { id: "roster", label: "Roster & Payments" },
           { id: "picks", label: "Manage Picks" },
+          { id: "announce", label: "Announcements" },
           { id: "email", label: "Email" },
         ].map((t) => (
           <button
@@ -43,6 +44,7 @@ export default function AdminPage() {
       {adminTab === "games" && <GamesTab />}
       {adminTab === "roster" && <RosterTab />}
       {adminTab === "picks" && <ManagePicksTab />}
+      {adminTab === "announce" && <AnnouncementsTab />}
       {adminTab === "email" && <EmailTab /> }
     </div>
   );
@@ -74,6 +76,7 @@ function GamesTab() {
   const [lockInBusy, setLockInBusy] = useState(false);
   const [lockInResult, setLockInResult] = useState(null);
   const [lockInError, setLockInError] = useState("");
+  const [notifyAssigned, setNotifyAssigned] = useState(true);
 
   const [allGamesByWeek, setAllGamesByWeek] = useState({});
 
@@ -320,6 +323,7 @@ function GamesTab() {
 
       const skipped = [];
       const toInsert = [];
+      const assignInfo = {}; // entry_id -> { entry, autoNote }, for the "your pick was auto-assigned" notices
       let aliveCount = 0;
       let withPickCount = 0;
 
@@ -347,6 +351,7 @@ function GamesTab() {
         }
 
         toInsert.push({ entry_id: entry.id, week: editWeek, team: fallback.team, auto_assigned: true });
+        assignInfo[entry.id] = { entry, autoNote: fallback.autoNote };
       }
 
       // Last chance to catch bad data before anything is written: if the
@@ -370,22 +375,58 @@ function GamesTab() {
       let lockedCount = 0;
       let alreadyHadPick = 0;
       const failures = [];
+      const assigned = []; // rows actually inserted: { entry_id, team }
       const chunkSize = 500;
       for (let i = 0; i < toInsert.length; i += chunkSize) {
         const chunk = toInsert.slice(i, i + chunkSize);
         const { data: inserted, error: insErr } = await supabase
           .from("picks")
           .upsert(chunk, { onConflict: "entry_id,week", ignoreDuplicates: true })
-          .select("id");
+          .select("entry_id, team");
         if (insErr) {
           failures.push(`${chunk.length} pick(s): ${insErr.message}`);
           continue;
         }
         lockedCount += (inserted || []).length;
         alreadyHadPick += chunk.length - (inserted || []).length;
+        assigned.push(...(inserted || []));
       }
 
-      setLockInResult({ lockedCount, alreadyHadPick, skipped, failures });
+      // Tell each affected person directly (site banner + phone push), one
+      // notice per account covering all of that account's entries -- so
+      // nobody logs in days later to an unexplained team on their entry.
+      let notifyNote = "";
+      if (notifyAssigned && assigned.length > 0) {
+        const linesByUser = {};
+        assigned.forEach((row) => {
+          const info = assignInfo[row.entry_id];
+          if (!info) return;
+          linesByUser[info.entry.user_id] = linesByUser[info.entry.user_id] || [];
+          linesByUser[info.entry.user_id].push(`${info.entry.label}: ${row.team} (${info.autoNote})`);
+        });
+        const notices = Object.entries(linesByUser).map(([userId, lines]) => ({
+          userId,
+          title: `Week ${editWeek}: your pick was auto-assigned`,
+          body:
+            "No pick was in by the deadline, so per the rules you were given:\n" +
+            lines.map((l) => `• ${l}`).join("\n"),
+        }));
+        try {
+          const json = await postNotify({
+            notices,
+            banner: true,
+            push: true,
+            expiresAt: new Date(Date.now() + 14 * 86400000).toISOString(),
+          });
+          notifyNote = json.error
+            ? ` Notifications NOT sent: ${json.error}`
+            : ` Notified ${notices.length} ${notices.length === 1 ? "person" : "people"} with a banner.${describePushResult(json.push)}`;
+        } catch (e) {
+          notifyNote = ` Notifications NOT sent: ${e.message}`;
+        }
+      }
+
+      setLockInResult({ lockedCount, alreadyHadPick, skipped, failures, notifyNote });
       load();
     } catch (e) {
       setLockInError(e.message);
@@ -579,6 +620,10 @@ function GamesTab() {
             <button className="btn-primary" onClick={lockInMissingPicks} disabled={lockInBusy}>
               {lockInBusy ? "Locking in…" : `Lock in missing picks for week ${editWeek}`}
             </button>
+            <label className="text-xs flex items-center gap-2">
+              <input type="checkbox" checked={notifyAssigned} onChange={(e) => setNotifyAssigned(e.target.checked)} />
+              Notify each affected person (site banner + phone notification)
+            </label>
           </div>
           <p className="text-xs text-chalk/50 mt-2">
             Click this once, right after the pick deadline has passed for the week (and before any games are
@@ -595,6 +640,7 @@ function GamesTab() {
                 ` ${lockInResult.alreadyHadPick} entr${lockInResult.alreadyHadPick === 1 ? "y" : "ies"} saved a pick of their own while this ran and ${lockInResult.alreadyHadPick === 1 ? "was" : "were"} left alone.`}
               {lockInResult.skipped.length > 0 &&
                 ` Couldn't find a fallback for: ${lockInResult.skipped.join(", ")} (no favorites set on eligible games).`}
+              {lockInResult.notifyNote}
             </p>
           )}
           {lockInResult?.failures?.length > 0 && (
@@ -801,6 +847,192 @@ function RosterTab() {
 // ------------------------------------------------------------------
 // Manage Picks (set/change a pick on behalf of any entry)
 // ------------------------------------------------------------------
+// Posts a notice to the server, which saves the site banner and/or sends
+// push notifications (see app/api/notify). Returns the parsed response.
+async function postNotify(body) {
+  const { data: sessionData } = await supabase.auth.getSession();
+  const token = sessionData?.session?.access_token || "";
+  const res = await fetch("/api/notify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify(body),
+  });
+  return res.json();
+}
+
+function describePushResult(push) {
+  if (!push) return "";
+  if (push.error) return ` Push not sent: ${push.error}`;
+  return ` Push sent to ${push.sent} of ${push.devices} device${push.devices === 1 ? "" : "s"}.`;
+}
+
+// ------------------------------------------------------------------
+// Announcements (site banner + phone push notifications)
+// ------------------------------------------------------------------
+function AnnouncementsTab() {
+  const [profiles, setProfiles] = useState([]);
+  const [pushUsers, setPushUsers] = useState(0);
+  const [pushDevices, setPushDevices] = useState(0);
+  const [recent, setRecent] = useState([]);
+  const [audience, setAudience] = useState("everyone"); // "everyone" | a user id
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [banner, setBanner] = useState(true);
+  const [push, setPush] = useState(true);
+  const [alsoEmail, setAlsoEmail] = useState(false);
+  const [days, setDays] = useState("7");
+  const [sending, setSending] = useState(false);
+  const [result, setResult] = useState("");
+  const [error, setError] = useState("");
+
+  const load = useCallback(async () => {
+    const profs = await fetchAllRows("profiles", "id,email,display_name");
+    setProfiles(profs.sort((a, b) => (a.email || "").localeCompare(b.email || "")));
+    const subs = await fetchAllRows("push_subscriptions", "user_id", "created_at");
+    setPushDevices(subs.length);
+    setPushUsers(new Set(subs.map((s) => s.user_id)).size);
+    const { data: rows } = await supabase.from("notices").select("*").order("created_at", { ascending: false }).limit(30);
+    setRecent(rows || []);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const emailFor = (id) => profiles.find((p) => p.id === id)?.email || "one person";
+
+  const send = async () => {
+    setSending(true);
+    setResult("");
+    setError("");
+    try {
+      const userId = audience === "everyone" ? null : audience;
+      const expiresAt = days === "never" ? null : new Date(Date.now() + Number(days) * 86400000).toISOString();
+      let summary = "";
+      if (banner || push) {
+        const json = await postNotify({ notices: [{ userId, title, body }], banner, push, expiresAt });
+        if (json.error) throw new Error(json.error);
+        if (json.bannersPosted) summary += " Banner posted.";
+        summary += describePushResult(json.push);
+      }
+      if (alsoEmail) {
+        const recipients = userId
+          ? [emailFor(userId)]
+          : Array.from(new Set(profiles.map((p) => p.email).filter(Boolean)));
+        const { data: sessionData } = await supabase.auth.getSession();
+        const res = await fetch("/api/send-email", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${sessionData?.session?.access_token || ""}` },
+          body: JSON.stringify({ subject: title, message: body, recipients }),
+        });
+        const json = await res.json();
+        summary += json.error ? ` Email not sent: ${json.error}` : ` Emailed ${json.sent} of ${json.total}.`;
+      }
+      setResult(summary.trim());
+      setTitle("");
+      setBody("");
+      load();
+    } catch (e) {
+      setError(e.message);
+    }
+    setSending(false);
+  };
+
+  const removeNotice = async (n) => {
+    if (!confirm(`Take down "${n.title}"? It disappears from the banner for everyone who hasn't dismissed it yet.`)) return;
+    const { error: delErr } = await supabase.from("notices").delete().eq("id", n.id);
+    if (delErr) { alert("Couldn't remove: " + delErr.message); return; }
+    setRecent((prev) => prev.filter((r) => r.id !== n.id));
+  };
+
+  const canSend = title.trim() && (banner || push || alsoEmail) && !sending;
+  const now = Date.now();
+
+  return (
+    <div className="grid gap-5 max-w-2xl">
+      <p className="text-xs text-chalk/50">
+        The banner shows at the top of the site for each person until they tap "Got it". Push notifications go to the{" "}
+        {pushDevices} device{pushDevices === 1 ? "" : "s"} ({pushUsers} {pushUsers === 1 ? "person" : "people"}) that have
+        turned them on from My Entries.
+      </p>
+
+      <label className="text-xs flex items-center gap-2">
+        Send to
+        <select value={audience} onChange={(e) => setAudience(e.target.value)} className="flex-1">
+          <option value="everyone">Everyone</option>
+          {profiles.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.display_name && p.display_name !== p.email ? `${p.display_name} (${p.email})` : p.email}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <div>
+        <div className="text-xs text-chalk/50 mb-1">Title (this is the notification headline)</div>
+        <input className="w-full" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Week 5 picks update" />
+      </div>
+      <div>
+        <div className="text-xs text-chalk/50 mb-1">Message</div>
+        <textarea className="w-full min-h-[120px]" value={body} onChange={(e) => setBody(e.target.value)} />
+      </div>
+
+      <div className="grid gap-2 text-sm">
+        <label className="flex items-center gap-2 flex-wrap">
+          <input type="checkbox" checked={banner} onChange={(e) => setBanner(e.target.checked)} />
+          Show as a banner on the site for
+          <select value={days} onChange={(e) => setDays(e.target.value)} disabled={!banner} className="w-40">
+            <option value="3">3 days</option>
+            <option value="7">1 week</option>
+            <option value="14">2 weeks</option>
+            <option value="never">until I take it down</option>
+          </select>
+        </label>
+        <label className="flex items-center gap-2">
+          <input type="checkbox" checked={push} onChange={(e) => setPush(e.target.checked)} />
+          Send a push notification to phones
+        </label>
+        <label className="flex items-center gap-2">
+          <input type="checkbox" checked={alsoEmail} onChange={(e) => setAlsoEmail(e.target.checked)} />
+          Also send as an email
+        </label>
+      </div>
+
+      <button className="btn-primary w-fit" disabled={!canSend} onClick={send}>
+        {sending ? "Sending…" : audience === "everyone" ? "Send to everyone" : `Send to ${emailFor(audience)}`}
+      </button>
+      {error && <p className="text-rust text-sm">{error}</p>}
+      {result && <p className="text-leaf text-sm">{result}</p>}
+
+      <div>
+        <div className="text-sm font-bold mb-2">Recent banners</div>
+        {recent.length === 0 && <p className="text-chalk/50 text-sm">None yet.</p>}
+        <div className="grid gap-2">
+          {recent.map((n) => {
+            const expired = n.expires_at && new Date(n.expires_at).getTime() <= now;
+            return (
+              <div key={n.id} className="border border-turfline rounded-lg p-3 flex items-start gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="font-bold text-sm">{n.title}</div>
+                  <div className="text-xs text-chalk/50">
+                    To {n.user_id ? emailFor(n.user_id) : "everyone"} ·{" "}
+                    {new Date(n.created_at).toLocaleString("en-US", { month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" })}
+                    {" · "}
+                    {expired
+                      ? "expired"
+                      : n.expires_at
+                      ? `showing until ${new Date(n.expires_at).toLocaleDateString("en-US", { month: "numeric", day: "numeric" })}`
+                      : "showing until taken down"}
+                  </div>
+                </div>
+                {!expired && <button className="btn-ghost" onClick={() => removeNotice(n)}>Take down</button>}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ------------------------------------------------------------------
 // Email (blast everyone, or remind whoever hasn't picked yet)
 // ------------------------------------------------------------------

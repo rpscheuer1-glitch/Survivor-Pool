@@ -168,6 +168,33 @@ Things worth knowing:
 - If literally everyone already has a pick in when it fires, it just skips
   sending anything (you can check the result in Vercel's Cron Jobs logs).
 
+## 9. Phone notifications and site banners
+
+People can turn on push notifications from **My Entries**, and they show up on
+their phone's lock screen like a text from an app. Android works right in the
+browser. **iPhones require adding the site to the home screen first** (Safari →
+Share → Add to Home Screen, then open it from that icon); the My Entries page
+walks iPhone users through that.
+
+What sends them:
+- **Admin > Announcements**: write a title and message, then choose who gets
+  it (everyone or one person) and how: a banner at the top of the site (shown
+  until each person taps "Got it"), a push notification, and/or email.
+- **Lock in missing picks**: everyone whose pick gets auto-assigned
+  automatically gets a personal banner and push saying which team they were
+  given and why. You can turn this off with the checkbox next to the button.
+- **The Saturday/Sunday reminder cron** also pushes to anyone still missing a pick.
+
+Setup, once:
+1. Run `supabase/sync_schema.sql` again. It adds the `notices`,
+   `notice_dismissals`, and `push_subscriptions` tables.
+2. Add these three variables to Vercel (copy the values from your
+   `.env.local`; they're already generated there):
+   `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`.
+   Keep the same pair forever. If they change, everyone has to turn
+   notifications back on. The private key is secret, like the service-role key.
+3. Redeploy.
+
 ## Keeping the database in sync
 
 Instead of tracking individual migration files, run **`supabase/sync_schema.sql`**
