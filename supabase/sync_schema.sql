@@ -368,10 +368,6 @@ do $$ begin
   create policy "picks: admin delete" on picks for delete using (is_pool_admin());
 exception when duplicate_object then null; end $$;
 
-do $$ begin
-  create policy "pick_history: admin read" on pick_history for select using (is_pool_admin());
-exception when duplicate_object then null; end $$;
-
 -- Lock times + public-safe views (same as security_step1_views.sql) ----------
 -- STEP 1 OF 2 -- additive only. Nothing here changes who can read or write
 -- anything, so it is safe to run at any time, before or after deploying code.
@@ -442,6 +438,98 @@ create or replace view public.revealed_picks as
 
 grant select on public.public_entries to anon, authenticated;
 grant select on public.revealed_picks to anon, authenticated;
+
+-- Admins can't see picks before lock (same as security_step3_hide_picks_from_admins.sql) --
+-- Has every game in this week locked, or has the week been marked final?
+create or replace function public.week_picks_revealed(p_week int)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    coalesce((select final from public.weeks where week = p_week), false)
+    or coalesce((
+      select bool_and(
+        now() >= least(
+          g.kickoff,
+          public.game_lock_time(
+            g.game_date,
+            coalesce(w.weekend_lock_day, 'sunday'),
+            coalesce(w.weekend_lock_time, '10:00')
+          )
+        )
+      )
+      from public.games g
+      left join public.weeks w on w.week = g.week
+      where g.week = p_week
+        and (g.game_date is not null or g.kickoff is not null)
+    ), false)
+$$;
+
+-- Only tightens the locked-down read rule (security_step2_lockdown.sql) if
+-- it's in place; an open "read all" pool is left as it is.
+do $$ begin
+  if exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'picks' and policyname = 'picks: read own or admin') then
+    drop policy "picks: read own or admin" on public.picks;
+    create policy "picks: read own or admin" on public.picks for select
+      using (
+        exists (select 1 from public.entries e where e.id = picks.entry_id and e.user_id = auth.uid())
+        or (
+          public.is_pool_admin()
+          and (
+            picks.auto_assigned
+            or public.pick_is_locked(picks.week, picks.team)
+            or public.week_picks_revealed(picks.week)
+          )
+        )
+      );
+  end if;
+end $$;
+
+drop policy if exists "pick_history: admin read" on public.pick_history;
+create policy "pick_history: admin read" on public.pick_history for select
+  using (
+    public.is_pool_admin()
+    and (
+      public.week_picks_revealed(pick_history.week)
+      or (
+        (pick_history.old_team is null or public.pick_is_locked(pick_history.week, pick_history.old_team))
+        and (pick_history.new_team is null or public.pick_is_locked(pick_history.week, pick_history.new_team))
+      )
+    )
+  );
+
+create or replace view public.pick_flags as
+  select p.id, p.entry_id, p.week
+  from public.picks p
+  where public.is_pool_admin();
+
+grant select on public.pick_flags to authenticated;
+
+create or replace function public.admin_set_pick(p_entry_id uuid, p_week int, p_team text)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.is_pool_admin() then
+    raise exception 'Not authorized';
+  end if;
+  if p_team is null or p_team = '' then
+    delete from public.picks where entry_id = p_entry_id and week = p_week;
+  else
+    insert into public.picks (entry_id, week, team, auto_assigned)
+    values (p_entry_id, p_week, p_team, false)
+    on conflict (entry_id, week) do update set team = excluded.team, auto_assigned = false;
+  end if;
+end;
+$$;
+
+revoke execute on function public.admin_set_pick(uuid, int, text) from public, anon;
+grant execute on function public.admin_set_pick(uuid, int, text) to authenticated;
 
 -- Notifications: site banner notices and phone push subscriptions.
 -- dismisses it. user_id null = everyone; otherwise only that one person

@@ -225,3 +225,11 @@ own entries/picks, nobody can change a pick for a locked game by calling the
 API directly, and the public Weekly Summary only gets names and already-locked
 picks. `supabase/security_rollback.sql` undoes step 3. Re-running
 `sync_schema.sql` afterwards does not undo the lockdown.
+
+Then run `supabase/security_step3_hide_picks_from_admins.sql` so admin
+accounts can't see picks before lock either. An admin only gets back
+another person's pick, or its entries in Manage Picks > History, once that
+game has locked (or the whole week has, or it's marked final). Admin tools
+still know *whether* an entry has a pick (the `pick_flags` view) and can
+still set or clear one (`admin_set_pick`). Anyone who can log into the
+Supabase project itself can still open the raw tables there.

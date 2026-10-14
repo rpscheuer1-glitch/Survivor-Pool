@@ -8,6 +8,8 @@ begin;
 
 -- READING: a person sees only their own entries and picks; admins see all.
 -- (The public Weekly Summary uses the views from step 1 instead.)
+-- security_step3_hide_picks_from_admins.sql then narrows the admin part to
+-- locked picks only; re-run step 3 (or sync_schema.sql) if you re-run this.
 drop policy if exists "entries: read all" on public.entries;
 drop policy if exists "entries: read own or admin" on public.entries;
 create policy "entries: read own or admin" on public.entries for select

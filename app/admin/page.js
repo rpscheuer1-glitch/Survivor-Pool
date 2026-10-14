@@ -344,6 +344,10 @@ function GamesTab() {
       const allGames = await fetchAllRows("games", "*", "created_at");
       const allWeeks = await fetchAllRows("weeks", "*", "week");
       const allPicks = await fetchAllRows("picks", "*", "created_at");
+      // Admins only get picks back once their game locks; this says which
+      // entries have one at all, so a hidden pick isn't mistaken for none.
+      const allFlags = await fetchAllRows("pick_flags", "id, entry_id, week", "id");
+      const hasPickThisWeek = new Set(allFlags.filter((f) => f.week === editWeek).map((f) => f.entry_id));
 
       const finalByWeek = {};
       const lockSettingsByWeek = {};
@@ -392,8 +396,8 @@ function GamesTab() {
 
         const savedTeam = entryPicks[editWeek]?.team || null;
         const savedProblem = pickProblem(savedTeam, editWeek, gamesByWeek);
-        if (savedTeam && !savedProblem) {
-          withPickCount += 1; // already has a pick this week
+        if ((savedTeam && !savedProblem) || (!savedTeam && hasPickThisWeek.has(entry.id))) {
+          withPickCount += 1; // already has a pick this week (possibly one not visible yet)
           continue;
         }
 
@@ -1168,6 +1172,9 @@ function EmailTab() {
     const gameRows = await fetchAllRows("games", "*", "created_at");
     const weekRows = await fetchAllRows("weeks", "*", "week");
     const pickRows = await fetchAllRows("picks", "*", "created_at");
+    // Picks themselves stay hidden from admins until lock; this only says who has one.
+    const flagRows = await fetchAllRows("pick_flags", "id, entry_id, week", "id");
+    const hasPick = new Set(flagRows.filter((f) => f.week === wk).map((f) => f.entry_id));
 
     const finalByWeek = {};
     const lockSettingsByWeek = {};
@@ -1192,8 +1199,7 @@ function EmailTab() {
     (entries || []).forEach((e) => {
       const status = computeStatus(picksByEntry[e.id] || {}, gamesByWeek, finalByWeek);
       const alreadyEliminated = status.eliminated && status.eliminatedWeek < wk;
-      const hasPick = !!(picksByEntry[e.id] && picksByEntry[e.id][wk]);
-      if (!alreadyEliminated && !hasPick) {
+      if (!alreadyEliminated && !hasPick.has(e.id)) {
         list.push({ label: e.label, email: e.email });
       }
     });
@@ -1329,7 +1335,8 @@ function ManagePicksTab() {
   const [week, setWeek] = useState(1);
   const [entries, setEntries] = useState([]);
   const [games, setGames] = useState([]);
-  const [picks, setPicks] = useState({}); // entry_id -> { team, auto }
+  const [picks, setPicks] = useState({}); // entry_id -> { team, auto } -- only picks the admin may see
+  const [hiddenPicks, setHiddenPicks] = useState({}); // entry_id -> true: has a pick, not visible until lock
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [savedIds, setSavedIds] = useState({});
@@ -1404,6 +1411,11 @@ function ManagePicksTab() {
       .forEach((pk) => { p[pk.entry_id] = { team: pk.team, auto: pk.auto_assigned, updatedAt: pk.updated_at }; });
     setPicks(p);
 
+    const flagRows = await fetchAllRows("pick_flags", "id, entry_id, week", "id");
+    const hidden = {};
+    flagRows.filter((f) => f.week === week && !p[f.entry_id]).forEach((f) => { hidden[f.entry_id] = true; });
+    setHiddenPicks(hidden);
+
     const finalByWeek = {};
     const lockSettingsByWeek = {};
     (allWeekRows || []).forEach((w) => {
@@ -1435,22 +1447,26 @@ function ManagePicksTab() {
 
   const teamOptions = Array.from(new Set(games.flatMap((g) => [g.away, g.home])));
 
+  // Goes through admin_set_pick so a pick the admin can't see yet can still
+  // be replaced or cleared (a plain update can't touch rows it can't read).
   const setPickFor = async (entryId, team) => {
+    if (hiddenPicks[entryId]) {
+      const ok = confirm(
+        team
+          ? `This entry already has a pick you can't see until its game locks. Replace it with ${team}?`
+          : "This entry already has a pick you can't see until its game locks. Clear it?"
+      );
+      if (!ok) return;
+    }
+    const { error: rpcErr } = await supabase.rpc("admin_set_pick", { p_entry_id: entryId, p_week: week, p_team: team || null });
+    if (rpcErr) {
+      alert(`Couldn't ${team ? "save" : "clear"} pick: ${rpcErr.message}`);
+      return;
+    }
+    setHiddenPicks((h) => { const next = { ...h }; delete next[entryId]; return next; });
     if (!team) {
-      const { error: delErr } = await supabase.from("picks").delete().eq("entry_id", entryId).eq("week", week);
-      if (delErr) {
-        alert("Couldn't clear pick: " + delErr.message);
-        return;
-      }
       setPicks((p) => { const next = { ...p }; delete next[entryId]; return next; });
     } else {
-      const { error: upErr } = await supabase
-        .from("picks")
-        .upsert({ entry_id: entryId, week, team, auto_assigned: false }, { onConflict: "entry_id,week" });
-      if (upErr) {
-        alert("Couldn't save pick: " + upErr.message);
-        return;
-      }
       setPicks((p) => ({ ...p, [entryId]: { team, auto: false } }));
     }
     setSavedIds((s) => ({ ...s, [entryId]: true }));
@@ -1523,7 +1539,8 @@ function ManagePicksTab() {
             const pickInfo = picks[entry.id];
             const pickedTeam = pickInfo?.team || null;
             const game = pickedTeam ? games.find((g) => g.home === pickedTeam || g.away === pickedTeam) : null;
-            const revealed = !pickedTeam || !game || isLocked(game);
+            const isHidden = !!hiddenPicks[entry.id] || (!!pickedTeam && !!game && !isLocked(game));
+            const revealed = !isHidden;
             const displayValue = revealed ? pickedTeam || "" : "";
 
             return (
@@ -1544,10 +1561,10 @@ function ManagePicksTab() {
                   onChange={(e) => setPickFor(entry.id, e.target.value)}
                   className="w-56"
                 >
-                  <option value="">{pickedTeam && !revealed ? "— Hidden until game locks —" : "— No pick —"}</option>
+                  <option value="">{isHidden ? "— Hidden until game locks —" : "— No pick —"}</option>
                   {teamOptions.map((t) => <option key={t} value={t}>{t}</option>)}
                 </select>
-                {pickedTeam && !revealed && (
+                {isHidden && (
                   <span className="text-chalk/50 text-xs italic" title="This pick exists but stays hidden, even from admin, until that specific game locks.">
                     Hidden until locked
                   </span>
@@ -1579,7 +1596,7 @@ function ManagePicksTab() {
                     {historyLoading ? (
                       <p className="text-chalk/50">Loading history…</p>
                     ) : historyRows.length === 0 ? (
-                      <p className="text-chalk/50">No recorded changes for this week yet.</p>
+                      <p className="text-chalk/50">No changes you can see yet. Changes involving a game that hasn't locked stay hidden until it does.</p>
                     ) : (
                       <div className="grid gap-1">
                         {historyRows.map((h) => {
