@@ -61,7 +61,9 @@ export default function Standings() {
         const tally = {};
         let noPick = 0;
         remainingEntries.forEach((s) => {
-          const pick = s.status.detail[wk]?.pick;
+          // A pick that no longer counts (game removed / over the spread limit) is no pick.
+          const d = s.status.detail[wk];
+          const pick = d?.invalid ? null : d?.pick;
           if (!pick) {
             noPick += 1;
             return;
@@ -91,7 +93,8 @@ export default function Standings() {
         // a specific pick only shows once that specific game has locked.
         const entryPicks = remainingEntries
           .map((s) => {
-            const pick = s.status.detail[wk]?.pick || null;
+            const d = s.status.detail[wk];
+            const pick = (!d?.invalid && d?.pick) || null;
             let revealed = false;
             let result = null;
             if (pick) {

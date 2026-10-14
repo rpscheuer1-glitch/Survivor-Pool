@@ -1,9 +1,9 @@
 "use client";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { supabase, fetchAllRows } from "../../lib/supabaseClient";
 import { useAuth } from "../../lib/useAuth";
-import { ruleLabel, spreadLabel, computeStatus, computeFallbackPick, weekFullyLocked, computeAutoCurrentWeek, weekEndsAt, isLocked, TIE } from "../../lib/poolLogic";
+import { ineligible, pickProblem, ruleLabel, spreadLabel, computeStatus, computeFallbackPick, weekFullyLocked, computeAutoCurrentWeek, weekEndsAt, isLocked, TIE } from "../../lib/poolLogic";
 import { TEAMS } from "../../lib/teams";
 
 export default function AdminPage() {
@@ -71,6 +71,8 @@ function GamesTab() {
 
   const [resultsLoading, setResultsLoading] = useState(false);
   const [resultsMessage, setResultsMessage] = useState("");
+  const [pickCheckMsg, setPickCheckMsg] = useState("");
+  const spreadAtFocus = useRef({});
   const [resultsError, setResultsError] = useState("");
 
   const [lockInBusy, setLockInBusy] = useState(false);
@@ -112,6 +114,7 @@ function GamesTab() {
   }, [editWeek]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { setPickCheckMsg(""); }, [editWeek]);
 
   const saveLockSettings = async (day, time) => {
     const { error: upErr } = await supabase
@@ -216,6 +219,7 @@ function GamesTab() {
       let spreadsUpdated = 0;
       let kickoffsUpdated = 0;
       let spreadsFrozen = 0;
+      const newlyIneligibleTeams = [];
 
       for (const g of games) {
         const match = (json.games || []).find(
@@ -233,7 +237,12 @@ function GamesTab() {
         const lockedNow = isLocked({ ...g, weekend_lock_day: weekendLockDay, weekend_lock_time: weekendLockTime });
         if (match.spread != null && Number(match.spread) !== Number(g.spread)) {
           if (lockedNow) spreadsFrozen += 1;
-          else patch.spread = match.spread;
+          else {
+            patch.spread = match.spread;
+            if (ineligible(match.spread, editWeek) && !ineligible(g.spread, editWeek)) {
+              newlyIneligibleTeams.push(g.home, g.away);
+            }
+          }
         }
         // Backfill/refresh kickoff so early games lock at their actual start.
         if (match.kickoff && (!g.kickoff || new Date(g.kickoff).getTime() !== new Date(match.kickoff).getTime())) {
@@ -247,11 +256,18 @@ function GamesTab() {
         }
       }
 
+      const offBoard = newlyIneligibleTeams.length / 2;
+      const pickNote =
+        offBoard > 0
+          ? ` ${offBoard} game(s) moved over the spread limit. ${await checkAffectedPicks(newlyIneligibleTeams)}`
+          : "";
+
       setResultsMessage(
         (winnersSet === 0 && spreadsUpdated === 0 && kickoffsUpdated === 0
           ? "No updates — either nothing's changed, or the source doesn't have this week's lines/results posted yet."
           : `Updated ${spreadsUpdated} spread(s), ${kickoffsUpdated} kickoff time(s), and filled in ${winnersSet} winner(s).`) +
-          (spreadsFrozen > 0 ? ` Left ${spreadsFrozen} spread(s) unchanged because those games have already locked.` : "")
+          (spreadsFrozen > 0 ? ` Left ${spreadsFrozen} spread(s) unchanged because those games have already locked.` : "") +
+          pickNote
       );
     } catch (e) {
       setResultsError("Couldn't reach the schedule service: " + e.message);
@@ -265,9 +281,49 @@ function GamesTab() {
     setGames((prev) => prev.map((g) => (g.id === id ? { ...g, ...patch } : g)));
   };
 
+  // After a change that can make saved picks stop counting, has the server
+  // push a "pick again" notice to whoever is affected. Admins can't see
+  // picks before lock, so this only ever reports a count. Returns the text.
+  const checkAffectedPicks = async (teams) => {
+    let text;
+    try {
+      const json = await postNotifyIneligiblePicks(editWeek, teams);
+      if (json.error) text = `Couldn't check for affected picks: ${json.error}`;
+      else if (!json.affected) text = "No saved picks were affected.";
+      else
+        text =
+          `${json.affected} saved pick(s) no longer count; ${json.people} player(s) need to pick again ` +
+          `and will see it on their dashboard.${describePushResult(json.push)}`;
+    } catch (e) {
+      text = `Couldn't check for affected picks: ${e.message}`;
+    }
+    return text;
+  };
+
   const removeGame = async (id) => {
-    await supabase.from("games").delete().eq("id", id);
+    const game = games.find((g) => g.id === id);
+    if (!game) return;
+    if (!confirm(`Remove ${game.away} @ ${game.home} from week ${editWeek}? Anyone who already picked either team will be told to pick again.`)) return;
+    const { error: delErr } = await supabase.from("games").delete().eq("id", id);
+    if (delErr) { setError(delErr.message); return; }
     setGames((prev) => prev.filter((g) => g.id !== id));
+    setPickCheckMsg(`Removed ${game.away} @ ${game.home}. ` + (await checkAffectedPicks([game.home, game.away])));
+  };
+
+  // Swapping a team out of a game orphans any pick on the old team.
+  const changeTeam = async (g, side, team) => {
+    const old = g[side];
+    await updateGame(g.id, { [side]: team });
+    if (old !== team) setPickCheckMsg(`Replaced ${old} in week ${editWeek}. ` + (await checkAffectedPicks([old])));
+  };
+
+  // Spreads save on every keystroke, so the "is it over the limit now?"
+  // check waits until the admin leaves the field.
+  const spreadBlurred = async (g) => {
+    const before = spreadAtFocus.current[g.id];
+    delete spreadAtFocus.current[g.id];
+    if (before === undefined || ineligible(before, editWeek) || !ineligible(g.spread, editWeek)) return;
+    setPickCheckMsg(`${g.away} @ ${g.home} is now off the board (spread ${g.spread}). ` + (await checkAffectedPicks([g.home, g.away])));
   };
 
   const toggleFinal = async () => {
@@ -323,6 +379,7 @@ function GamesTab() {
 
       const skipped = [];
       const toInsert = [];
+      const toReplace = []; // saved picks that no longer count (game removed / over the spread limit)
       const assignInfo = {}; // entry_id -> { entry, autoNote }, for the "your pick was auto-assigned" notices
       let aliveCount = 0;
       let withPickCount = 0;
@@ -333,7 +390,9 @@ function GamesTab() {
         if (status.eliminated && status.eliminatedWeek < editWeek) continue; // already out before this week
         aliveCount += 1;
 
-        if (entryPicks[editWeek]?.team) {
+        const savedTeam = entryPicks[editWeek]?.team || null;
+        const savedProblem = pickProblem(savedTeam, editWeek, gamesByWeek);
+        if (savedTeam && !savedProblem) {
           withPickCount += 1; // already has a pick this week
           continue;
         }
@@ -341,7 +400,7 @@ function GamesTab() {
         let lastPick = null;
         for (const w of priorWeekNums) {
           const d = status.detail[w];
-          if (d && d.pick) lastPick = d.pick;
+          if (d && d.pick && !d.invalid) lastPick = d.pick;
         }
 
         const fallback = computeFallbackPick(editWeek, lastPick, gamesByWeek);
@@ -350,18 +409,24 @@ function GamesTab() {
           continue;
         }
 
-        toInsert.push({ entry_id: entry.id, week: editWeek, team: fallback.team, auto_assigned: true });
-        assignInfo[entry.id] = { entry, autoNote: fallback.autoNote };
+        const row = { entry_id: entry.id, week: editWeek, team: fallback.team, auto_assigned: true };
+        if (savedTeam) toReplace.push({ row, oldTeam: savedTeam });
+        else toInsert.push(row);
+        assignInfo[entry.id] = {
+          entry,
+          autoNote: savedTeam ? `${fallback.autoNote}; your saved pick (${savedTeam}) no longer counted` : fallback.autoNote,
+        };
       }
 
       // Last chance to catch bad data before anything is written: if the
       // pick data didn't load fully, this number will be far too high.
-      if (toInsert.length > 0) {
+      const assignTotal = toInsert.length + toReplace.length;
+      if (assignTotal > 0) {
         const proceed = confirm(
           `Week ${editWeek}: ${withPickCount} of ${aliveCount} entries still alive already have a pick.
 
 ` +
-            `This will auto-assign picks to the other ${toInsert.length}.
+            `This will auto-assign picks to the other ${assignTotal}.
 
 ` +
             `Does that number look right? If it seems much too high, click Cancel and check the data first.`
@@ -390,6 +455,24 @@ function GamesTab() {
         lockedCount += (inserted || []).length;
         alreadyHadPick += chunk.length - (inserted || []).length;
         assigned.push(...(inserted || []));
+      }
+      // Matching on the old team means a pick the person changed while this
+      // ran is left alone, same as ignoreDuplicates above.
+      for (const { row, oldTeam } of toReplace) {
+        const { data: updated, error: updErr } = await supabase
+          .from("picks")
+          .update({ team: row.team, auto_assigned: true })
+          .eq("entry_id", row.entry_id)
+          .eq("week", row.week)
+          .eq("team", oldTeam)
+          .select("entry_id, team");
+        if (updErr) {
+          failures.push(`1 pick: ${updErr.message}`);
+          continue;
+        }
+        lockedCount += (updated || []).length;
+        alreadyHadPick += 1 - (updated || []).length;
+        assigned.push(...(updated || []));
       }
 
       // Tell each affected person directly (site banner + phone push), one
@@ -654,24 +737,27 @@ function GamesTab() {
           )}
         </div>
 
+        {pickCheckMsg && <p className="text-leaf text-sm mb-3">{pickCheckMsg}</p>}
         {loadingData ? (
           <p className="text-chalk/60 text-sm">Loading games…</p>
         ) : (
           <div className="grid gap-2">
             {games.map((g) => (
               <div key={g.id} className="border border-turfline rounded-lg p-3 flex gap-2 flex-wrap items-center">
-                <select value={g.away} onChange={(e) => updateGame(g.id, { away: e.target.value })} className="w-52">
+                <select value={g.away} onChange={(e) => changeTeam(g, "away", e.target.value)} className="w-52">
                   {TEAMS.map((t) => <option key={t} value={t}>{t}</option>)}
                 </select>
                 <span className="text-xs text-chalk/50">@</span>
-                <select value={g.home} onChange={(e) => updateGame(g.id, { home: e.target.value })} className="w-52">
+                <select value={g.home} onChange={(e) => changeTeam(g, "home", e.target.value)} className="w-52">
                   {TEAMS.map((t) => <option key={t} value={t}>{t}</option>)}
                 </select>
                 <input
                   type="number"
                   step="0.5"
                   value={g.spread}
+                  onFocus={() => { spreadAtFocus.current[g.id] = g.spread; }}
                   onChange={(e) => updateGame(g.id, { spread: Number(e.target.value) })}
+                  onBlur={() => spreadBlurred(g)}
                   className="w-24"
                   title="Spread relative to the home team: negative = home favored, positive = home underdog (e.g. -3.5 or 7)"
                 />
@@ -851,6 +937,19 @@ function RosterTab() {
 // ------------------------------------------------------------------
 // Manage Picks (set/change a pick on behalf of any entry)
 // ------------------------------------------------------------------
+// Asks the server to tell anyone whose saved pick on one of `teams` just
+// stopped counting to pick again (see app/api/notify-ineligible-picks).
+async function postNotifyIneligiblePicks(week, teams) {
+  const { data: sessionData } = await supabase.auth.getSession();
+  const token = sessionData?.session?.access_token || "";
+  const res = await fetch("/api/notify-ineligible-picks", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ week, teams }),
+  });
+  return res.json();
+}
+
 // Posts a notice to the server, which saves the site banner and/or sends
 // push notifications (see app/api/notify). Returns the parsed response.
 async function postNotify(body) {

@@ -72,7 +72,9 @@ export async function GET(request) {
   (entries || []).forEach((e) => {
     const status = computeStatus(picksByEntry[e.id] || {}, gamesByWeek, finalByWeek);
     const alreadyEliminated = status.eliminated && status.eliminatedWeek < week;
-    const hasPick = !!(picksByEntry[e.id] && picksByEntry[e.id][week]);
+    // A saved pick that no longer counts (game removed / over the spread
+    // limit) gets the same reminder as no pick at all.
+    const hasPick = !!(picksByEntry[e.id] && picksByEntry[e.id][week]) && !status.detail[week]?.invalid;
     if (!alreadyEliminated && !hasPick && e.email) missingEmails.add(e.email);
     if (!alreadyEliminated && !hasPick && e.user_id) missingUserIds.add(e.user_id);
   });

@@ -3,7 +3,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { supabase, fetchAllRows } from "../../lib/supabaseClient";
 import { useAuth } from "../../lib/useAuth";
-import { ineligible, ruleLabel, computeStatus, MAX_ENTRIES_PER_ACCOUNT, isLocked, formatGameDate, formatLockLabel, computeAutoCurrentWeek } from "../../lib/poolLogic";
+import { ineligible, pickProblem, describePickProblem, ruleLabel, computeStatus, MAX_ENTRIES_PER_ACCOUNT, isLocked, formatGameDate, formatLockLabel, computeAutoCurrentWeek } from "../../lib/poolLogic";
 import { abbr } from "../../lib/teams";
 import NotificationsCard from "../NotificationsCard";
 
@@ -178,7 +178,7 @@ export default function Dashboard() {
                         const d = status.detail[wk] || {};
                         const tone =
                           d.result === "win" ? "green" :
-                          d.result === "loss" || d.result === "nopick" ? "red" :
+                          d.result === "loss" || d.result === "nopick" || d.result === "invalid" ? "red" :
                           d.result === "pending" ? "amber" : "gray";
                         const toneColors = {
                           green: { bg: "rgba(63,166,108,0.22)", fg: "#3FA66C" },
@@ -389,7 +389,8 @@ function EntryDetail({ entry, picks, gamesByWeek, finalByWeek, currentWeek, week
         const weekGames = gamesByWeek[wk] || [];
         const submittedPick = picks[wk]?.team || null;
         const submittedGame = weekGames.find((g) => g.home === submittedPick || g.away === submittedPick);
-        const pickLockedIn = !!(submittedPick && submittedGame && isLocked(submittedGame));
+        const submittedProblem = pickProblem(submittedPick, wk, gamesByWeek);
+        const pickLockedIn = !!(submittedPick && submittedGame && isLocked(submittedGame) && !submittedProblem);
         const stagedPick = wk in stagedPicks ? stagedPicks[wk] : submittedPick || null;
 
         return (
@@ -403,14 +404,22 @@ function EntryDetail({ entry, picks, gamesByWeek, finalByWeek, currentWeek, week
                   className="w-36"
                 >
                   {openWeeks.map((w) => (
-                    <option key={w} value={w}>Week {w}{picks[w] ? " ✓" : ""}</option>
+                    <option key={w} value={w}>Week {w}{picks[w] && !pickProblem(picks[w].team, w, gamesByWeek) ? " ✓" : ""}</option>
                   ))}
                 </select>
               )}
             </div>
             <p className="text-xs text-chalk/50 mb-2">{ruleLabel(wk)}</p>
             <div className="text-sm mb-3">
-              {submittedPick ? (
+              {submittedProblem ? (
+                <div className="border border-rust rounded-lg px-4 py-3">
+                  <div className="text-rust font-bold">Your pick ({submittedPick}) no longer counts</div>
+                  <p className="text-xs text-chalk/70 mt-1">
+                    This is because {describePickProblem(submittedProblem)}. Pick another team below before the
+                    deadline. If you don't, this week counts as no pick, and the site assigns one under the usual rule.
+                  </p>
+                </div>
+              ) : submittedPick ? (
                 <span className="text-leaf font-bold">
                   Saved pick: {submittedPick}
                   {picks[wk]?.auto ? " (auto-assigned by the site, not chosen by you)" : ""}
@@ -532,6 +541,7 @@ function EntryDetail({ entry, picks, gamesByWeek, finalByWeek, currentWeek, week
                   {d.result === "win" && <Pill tone="green">Win</Pill>}
                   {d.result === "loss" && <Pill tone="red">Loss</Pill>}
                   {d.result === "nopick" && <Pill tone="red">No pick</Pill>}
+                  {d.result === "invalid" && <Pill tone="red">Doesn't count — pick again</Pill>}
                   {d.result === "pending" && <Pill tone="amber">Pending</Pill>}
                   {d.result === "upcoming" && <Pill tone="gray">Upcoming</Pill>}
                   {d.result === "na" && <Pill tone="gray">—</Pill>}
