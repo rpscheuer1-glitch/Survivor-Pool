@@ -3,7 +3,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { supabase, fetchAllRows } from "../../lib/supabaseClient";
 import { useAuth } from "../../lib/useAuth";
-import { ruleLabel, spreadLabel, computeStatus, computeFallbackPick, weekFullyLocked, computeAutoCurrentWeek, isLocked, TIE } from "../../lib/poolLogic";
+import { ruleLabel, spreadLabel, computeStatus, computeFallbackPick, weekFullyLocked, computeAutoCurrentWeek, weekEndsAt, isLocked, TIE } from "../../lib/poolLogic";
 import { TEAMS } from "../../lib/teams";
 
 export default function AdminPage() {
@@ -411,12 +411,16 @@ function GamesTab() {
             "No pick was in by the deadline, so per the rules you were given:\n" +
             lines.map((l) => `• ${l}`).join("\n"),
         }));
+        // The banner comes down when the next week starts -- once people are
+        // picking for a new week, an old auto-pick notice only confuses
+        // (especially if an admin has since changed that pick).
+        const bannerEnds = weekEndsAt(editWeek, gamesByWeek) || new Date(Date.now() + 7 * 86400000);
         try {
           const json = await postNotify({
             notices,
             banner: true,
             push: true,
-            expiresAt: new Date(Date.now() + 14 * 86400000).toISOString(),
+            expiresAt: bannerEnds.toISOString(),
           });
           notifyNote = json.error
             ? ` Notifications NOT sent: ${json.error}`
