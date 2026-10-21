@@ -19,7 +19,10 @@ export default function SignupPage() {
   useEffect(() => {
     (async () => {
       const { data } = await supabase.from("pool_settings").select("signups_locked").eq("id", 1).single();
-      setLocked(!!data?.signups_locked);
+      // Open playoff entries reopen sign-ups for new people even after the
+      // regular-season roster is locked.
+      const { data: playoff } = await supabase.from("playoff_settings").select("entries_open").eq("id", 1).maybeSingle();
+      setLocked(!!data?.signups_locked && !playoff?.entries_open);
       setCheckingLock(false);
     })();
   }, []);

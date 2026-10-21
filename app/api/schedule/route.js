@@ -39,6 +39,9 @@ export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const week = Number(searchParams.get("week"));
   const season = Number(searchParams.get("season"));
+  // playoffs=1 returns that week's playoff games instead (weeks 19-22: Wild
+  // Card, Divisional, Conference, Super Bowl) for the playoff pool.
+  const playoffs = searchParams.get("playoffs") === "1";
 
   if (!week || !season) {
     return Response.json({ error: "Missing week or season" }, { status: 400 });
@@ -64,6 +67,7 @@ export async function GET(request) {
     const homeIdx = col("home_team");
     const homeScoreIdx = col("home_score");
     const spreadIdx = col("spread_line");
+    const totalIdx = col("total_line");
 
     const games = lines
       .slice(1)
@@ -71,7 +75,7 @@ export async function GET(request) {
       .filter(
         (cols) =>
           Number(cols[seasonIdx]) === season &&
-          cols[typeIdx] === "REG" &&
+          (playoffs ? ["WC", "DIV", "CON", "SB"].includes(cols[typeIdx]) : cols[typeIdx] === "REG") &&
           Number(cols[weekIdx]) === week
       )
       .map((cols) => {
@@ -105,6 +109,8 @@ export async function GET(request) {
         // opposite of this app's own convention (negative = home favored,
         // matching standard sportsbook display). Flip the sign to convert.
         const spread = spreadStr !== "" && spreadStr != null ? -Number(spreadStr) : null;
+        const totalStr = cols[totalIdx];
+        const total = totalStr !== "" && totalStr != null ? Number(totalStr) : null;
 
         return {
           home,
@@ -115,6 +121,9 @@ export async function GET(request) {
           completed,
           winner,
           spread,
+          total,
+          home_score: completed ? Number(homeScoreStr) : null,
+          away_score: completed ? Number(awayScoreStr) : null,
         };
       })
       .filter((g) => g.home && g.away);

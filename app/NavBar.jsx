@@ -8,12 +8,15 @@ import { supabase } from "../lib/supabaseClient";
 export default function NavBar() {
   const { user, isAdmin } = useAuth();
   const [poolName, setPoolName] = useState("Survivor Pool");
+  const [playoffsVisible, setPlayoffsVisible] = useState(false);
   const pathname = usePathname();
 
   useEffect(() => {
     (async () => {
       const { data } = await supabase.from("pool_settings").select("pool_name").eq("id", 1).single();
       if (data?.pool_name) setPoolName(data.pool_name);
+      const { data: playoff } = await supabase.from("playoff_settings").select("visible").eq("id", 1).maybeSingle();
+      setPlayoffsVisible(!!playoff?.visible);
     })();
   }, [pathname]);
 
@@ -27,6 +30,7 @@ export default function NavBar() {
         <Link href="/rules" className="hover:text-amber">Rules</Link>
         <Link href="/standings" className="hover:text-amber">Weekly Summary</Link>
         {user && <Link href="/dashboard" className="hover:text-amber">My Entries</Link>}
+        {(playoffsVisible || isAdmin) && <Link href="/playoffs" className="hover:text-amber">Playoffs</Link>}
         {isAdmin && <Link href="/admin" className="hover:text-amber">Admin</Link>}
         {user ? (
           <button className="btn-ghost" onClick={() => supabase.auth.signOut()}>

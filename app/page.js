@@ -7,11 +7,14 @@ import { supabase } from "../lib/supabaseClient";
 export default function Home() {
   const { user, loading } = useAuth();
   const [poolName, setPoolName] = useState("the Pool");
+  const [playoffsVisible, setPlayoffsVisible] = useState(false);
 
   useEffect(() => {
     (async () => {
       const { data } = await supabase.from("pool_settings").select("pool_name").eq("id", 1).single();
       if (data?.pool_name) setPoolName(data.pool_name);
+      const { data: playoff } = await supabase.from("playoff_settings").select("visible").eq("id", 1).maybeSingle();
+      setPlayoffsVisible(!!playoff?.visible);
     })();
   }, []);
 
@@ -26,6 +29,11 @@ export default function Home() {
       <p className="text-chalk/70 mb-8 max-w-md mx-auto">
         Sign up (or log in) to see or create your entries, make your weekly picks, and check the weekly summary.
       </p>
+      {!loading && playoffsVisible && (
+        <div className="mb-6">
+          <Link href="/playoffs" className="btn-primary">Playoff pool</Link>
+        </div>
+      )}
       {!loading && (
         <div className="flex justify-center gap-4">
           {user ? (

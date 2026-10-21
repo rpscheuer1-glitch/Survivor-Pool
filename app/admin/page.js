@@ -5,6 +5,7 @@ import { supabase, fetchAllRows } from "../../lib/supabaseClient";
 import { useAuth } from "../../lib/useAuth";
 import { ineligible, pickProblem, ruleLabel, spreadLabel, computeStatus, computeFallbackPick, weekFullyLocked, computeAutoCurrentWeek, weekEndsAt, isLocked, TIE } from "../../lib/poolLogic";
 import { TEAMS } from "../../lib/teams";
+import PlayoffsTab from "./PlayoffsTab";
 
 export default function AdminPage() {
   const router = useRouter();
@@ -26,6 +27,7 @@ export default function AdminPage() {
           { id: "picks", label: "Manage Picks" },
           { id: "announce", label: "Announcements" },
           { id: "email", label: "Email" },
+          { id: "playoffs", label: "Playoffs" },
         ].map((t) => (
           <button
             key={t.id}
@@ -46,6 +48,7 @@ export default function AdminPage() {
       {adminTab === "picks" && <ManagePicksTab />}
       {adminTab === "announce" && <AnnouncementsTab />}
       {adminTab === "email" && <EmailTab /> }
+      {adminTab === "playoffs" && <PlayoffsTab />}
     </div>
   );
 }

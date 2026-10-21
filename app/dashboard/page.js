@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { supabase, fetchAllRows } from "../../lib/supabaseClient";
 import { useAuth } from "../../lib/useAuth";
 import { ineligible, pickProblem, describePickProblem, ruleLabel, computeStatus, MAX_ENTRIES_PER_ACCOUNT, isLocked, formatGameDate, formatLockLabel, computeAutoCurrentWeek } from "../../lib/poolLogic";
@@ -25,6 +26,7 @@ export default function Dashboard() {
   const [addingEntry, setAddingEntry] = useState(false);
   const [error, setError] = useState("");
   const [loadingData, setLoadingData] = useState(true);
+  const [playoffsVisible, setPlayoffsVisible] = useState(false);
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -32,6 +34,8 @@ export default function Dashboard() {
 
     const { data: settingsRow } = await supabase.from("pool_settings").select("*").eq("id", 1).single();
     if (settingsRow) setSettings(settingsRow);
+    const { data: playoffRow } = await supabase.from("playoff_settings").select("visible").eq("id", 1).maybeSingle();
+    setPlayoffsVisible(!!playoffRow?.visible);
 
     const { data: entryRows } = await supabase
       .from("entries")
@@ -153,6 +157,15 @@ export default function Dashboard() {
 
       {!selectedEntry && (
         <>
+          {playoffsVisible && (
+            <Link
+              href="/playoffs"
+              className="block mb-4 rounded-lg px-4 py-3 border-l-4 font-bold"
+              style={{ background: "rgba(242,102,26,0.12)", borderColor: "#F2661A" }}
+            >
+              The playoff pool is open — go to your playoff entries →
+            </Link>
+          )}
           <NotificationsCard />
           <div className="grid gap-2 mb-4">
             {entries.length === 0 && <p className="text-chalk/60 text-sm">No entries yet.</p>}

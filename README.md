@@ -195,6 +195,37 @@ Setup, once:
    notifications back on. The private key is secret, like the service-role key.
 3. Redeploy.
 
+## 10. Playoff pool
+
+A separate pool for the playoffs, with its own entries (up to 4 per person),
+under **Playoffs** in the menu. Each round, each entry picks one side against
+the spread or one over/under. Win and you advance; lose and you're out.
+Everyone still alive after the Super Bowl splits the pot. The full rules are
+on the Playoff Rules page and in `lib/playoffLogic.js`.
+
+1. Run **`supabase/playoffs.sql`** (or `sync_schema.sql`, which includes it).
+   It only adds new `playoff_*` tables and doesn't touch the regular-season
+   pool. The code works whether or not you've run it yet.
+2. In **Admin > Playoffs**, the section starts hidden: only admins see the
+   Playoffs link. Pick a round, click **Fetch games**, and add them.
+   Whole-number lines get the half point automatically.
+3. **Lines lock Wednesday at 1:00 PM Central** before each round's first game
+   (for the Super Bowl, the Wednesday right before it). Run **Sync lines,
+   kickoffs & scores** Wednesday morning to get the latest lines. After the
+   lock, syncing only updates kickoffs and final scores, and picks are graded
+   from the scores.
+4. When you're ready, check **Show the playoff pool to everyone** and
+   **Playoff entries open**. Opening entries also reopens the sign-up page.
+   If you turned off "Allow new users to sign up" in Supabase, turn it back on.
+5. Reminder emails and pushes go out on playoff Friday, Saturday and Sunday
+   mornings (see `vercel.json`) to alive entries without a pick, while picks
+   are still open.
+
+All of a round's picks lock together one hour before its first kickoff, so
+nobody can wait on Saturday's results to pick a Sunday game. No pick by then
+means the round's biggest favorite. Picks stay hidden from everyone, admins
+included, until that lock.
+
 ## Keeping the database in sync
 
 Instead of tracking individual migration files, run **`supabase/sync_schema.sql`**
