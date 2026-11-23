@@ -1,6 +1,7 @@
 import "./globals.css";
 import NavBar from "./NavBar";
 import NoticeBanner from "./NoticeBanner";
+import ActivityLogger from "./ActivityLogger";
 
 export const metadata = {
   title: "Survivor Pool",
@@ -18,6 +19,7 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <body className="min-h-screen">
+        <ActivityLogger />
         <NavBar />
         <main className="max-w-4xl mx-auto px-5 py-6">
           <NoticeBanner />

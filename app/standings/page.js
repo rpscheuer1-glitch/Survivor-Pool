@@ -158,7 +158,7 @@ export default function Standings() {
         </div>
       </div>
       <p className="text-sm text-chalk/60">{totalEntries} total entries in the pool.</p>
-      {weekly.map((w) => (
+      {[...weekly].reverse().map((w) => (
         <WeekCard key={w.week} w={w} isOpenByDefault={w.week === latestWeek} />
       ))}
     </div>

@@ -61,6 +61,7 @@ function GamesTab() {
   const [poolNameInput, setPoolNameInput] = useState("");
   const [poolNameSaved, setPoolNameSaved] = useState(false);
   const [editWeek, setEditWeek] = useState(1);
+  const editWeekDefaulted = useRef(false);
   const [games, setGames] = useState([]);
   const [weekFinal, setWeekFinal] = useState(false);
   const [loadingData, setLoadingData] = useState(true);
@@ -108,6 +109,17 @@ function GamesTab() {
       gbw[g.week].push(g);
     });
     setAllGamesByWeek(gbw);
+
+    // First load: jump the "Edit games for week" picker to the current week
+    // instead of week 1. Changing editWeek re-runs load() for that week.
+    if (!editWeekDefaulted.current) {
+      editWeekDefaulted.current = true;
+      const current = computeAutoCurrentWeek(gbw);
+      if (current && current !== editWeek) {
+        setEditWeek(current);
+        return;
+      }
+    }
 
     const { data: weekRow } = await supabase.from("weeks").select("*").eq("week", editWeek).maybeSingle();
     setWeekFinal(weekRow?.final || false);

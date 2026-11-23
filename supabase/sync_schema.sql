@@ -955,3 +955,69 @@ $$;
 
 revoke execute on function public.admin_set_playoff_pick(uuid, int, uuid, text) from public, anon;
 grant execute on function public.admin_set_playoff_pick(uuid, int, uuid, text) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Activity log: IP + device behind every pick change and sign-in/visit.
+-- (Same as migration_add_activity_log.sql.)
+create table if not exists activity_log (
+  id bigserial primary key,
+  user_id uuid,              -- who did it (null = system / server action)
+  event text not null,       -- sign_in, visit, pick, playoff_pick
+  ip text,
+  user_agent text,
+  detail jsonb,
+  created_at timestamptz not null default now()
+);
+-- No foreign key on user_id on purpose: the log survives an account deletion.
+
+create index if not exists activity_log_user_idx on activity_log (user_id, created_at desc);
+create index if not exists activity_log_ip_idx on activity_log (ip);
+
+alter table activity_log enable row level security;
+revoke all on activity_log from anon, authenticated;
+
+create or replace function public.log_pick_activity()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  h json;
+  client_ip text;
+begin
+  begin
+    h := nullif(current_setting('request.headers', true), '')::json;
+    client_ip := nullif(trim(split_part(coalesce(h->>'cf-connecting-ip', h->>'x-forwarded-for', ''), ',', 1)), '');
+    insert into activity_log (user_id, event, ip, user_agent, detail)
+    values (
+      auth.uid(),
+      tg_argv[0],
+      client_ip,
+      left(h->>'user-agent', 300),
+      jsonb_build_object('op', lower(tg_op))
+        || case when tg_op = 'DELETE' then jsonb_build_object('old', to_jsonb(old))
+                else jsonb_build_object('new', to_jsonb(new)) end
+    );
+  exception when others then
+    null; -- never let logging get in the way of saving a pick
+  end;
+  return null; -- AFTER trigger; return value is ignored
+end;
+$$;
+
+drop trigger if exists picks_log_activity on picks;
+create trigger picks_log_activity
+after insert or update or delete on picks
+for each row
+execute function public.log_pick_activity('pick');
+
+do $$
+begin
+  if to_regclass('public.playoff_picks') is not null then
+    execute 'drop trigger if exists playoff_picks_log_activity on playoff_picks';
+    execute 'create trigger playoff_picks_log_activity
+             after insert or update or delete on playoff_picks
+             for each row execute function public.log_pick_activity(''playoff_pick'')';
+  end if;
+end $$;
