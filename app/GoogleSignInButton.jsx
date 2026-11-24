@@ -11,6 +11,7 @@ export default function GoogleSignInButton() {
   };
 
   return (
+    <>
     <button
       type="button"
       onClick={handleClick}
@@ -25,5 +26,10 @@ export default function GoogleSignInButton() {
       </svg>
       Continue with Google
     </button>
+    <p className="text-xs text-chalk/50 mt-2 text-center">
+      Uses the Google account your phone or browser is signed into. Check the email Google shows before you continue.
+      If you already have a pool account under a different email, log in with that one instead.
+    </p>
+    </>
   );
 }

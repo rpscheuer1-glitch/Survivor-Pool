@@ -33,9 +33,16 @@ export default function NavBar() {
         {(playoffsVisible || isAdmin) && <Link href="/playoffs" className="hover:text-amber">Playoffs</Link>}
         {isAdmin && <Link href="/admin" className="hover:text-amber">Admin</Link>}
         {user ? (
-          <button className="btn-ghost" onClick={() => supabase.auth.signOut()}>
-            Sign out
-          </button>
+          <>
+            {/* Shows which account is signed in, so someone with two logins
+                (e.g. a Google sign-in and an email one) can tell them apart. */}
+            <span className="text-xs text-chalk/60 truncate max-w-[220px]" title={user.email}>
+              {user.email}
+            </span>
+            <button className="btn-ghost" onClick={() => supabase.auth.signOut()}>
+              Sign out
+            </button>
+          </>
         ) : (
           <>
             <Link href="/login" className="hover:text-amber">Log in</Link>

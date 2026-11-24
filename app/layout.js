@@ -2,6 +2,7 @@ import "./globals.css";
 import NavBar from "./NavBar";
 import NoticeBanner from "./NoticeBanner";
 import ActivityLogger from "./ActivityLogger";
+import NewGoogleAccountNotice from "./NewGoogleAccountNotice";
 
 export const metadata = {
   title: "Survivor Pool",
@@ -22,6 +23,7 @@ export default function RootLayout({ children }) {
         <ActivityLogger />
         <NavBar />
         <main className="max-w-4xl mx-auto px-5 py-6">
+          <NewGoogleAccountNotice />
           <NoticeBanner />
           {children}
         </main>
