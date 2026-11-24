@@ -6,6 +6,7 @@ import { useAuth } from "../../lib/useAuth";
 import { ineligible, pickProblem, ruleLabel, spreadLabel, computeStatus, computeFallbackPick, weekFullyLocked, computeAutoCurrentWeek, weekEndsAt, isLocked, TIE } from "../../lib/poolLogic";
 import { TEAMS } from "../../lib/teams";
 import PlayoffsTab from "./PlayoffsTab";
+import SeasonPanel from "./SeasonPanel";
 
 export default function AdminPage() {
   const router = useRouter();
@@ -540,16 +541,6 @@ function GamesTab() {
     setLockInBusy(false);
   };
 
-  const resetPool = async () => {
-    if (!confirm("This deletes ALL games, weeks, entries, and picks. This cannot be undone. Continue?")) return;
-    await supabase.from("picks").delete().neq("id", "00000000-0000-0000-0000-000000000000");
-    await supabase.from("entries").delete().neq("id", "00000000-0000-0000-0000-000000000000");
-    await supabase.from("games").delete().neq("id", "00000000-0000-0000-0000-000000000000");
-    await supabase.from("weeks").delete().neq("week", -1);
-    await supabase.from("pool_settings").update({ current_week: 1 }).eq("id", 1);
-    load();
-  };
-
   return (
     <div className="grid gap-8">
       {error && <p className="text-rust text-sm">{error}</p>}
@@ -807,9 +798,7 @@ function GamesTab() {
         <button className="btn-primary mt-3" onClick={() => addGame()}>+ Add game</button>
       </div>
 
-      <div>
-        <button className="btn-ghost text-rust border-rust" onClick={resetPool}>Reset entire pool</button>
-      </div>
+      <SeasonPanel settings={settings} onChanged={load} />
     </div>
   );
 }

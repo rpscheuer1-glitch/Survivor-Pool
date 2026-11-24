@@ -1071,3 +1071,34 @@ begin
                for each row execute function public.check_entry_not_blocked()';
   end if;
 end $$;
+
+-- Season over switch + admin week delete (same as migration_add_season_over.sql) --
+alter table pool_settings add column if not exists season_over boolean not null default false;
+alter table pool_settings add column if not exists season_over_message text;
+
+do $$ begin
+  create policy "weeks: admin delete" on weeks for delete using (is_pool_admin());
+exception when duplicate_object then null; end $$;
+
+-- Players can't add or change picks once the season is over. Admins and the
+-- server (no signed-in user) still can.
+create or replace function public.check_season_not_over()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if coalesce((select season_over from pool_settings where id = 1), false)
+     and auth.uid() is not null
+     and not public.is_pool_admin() then
+    raise exception 'The season is over, so picks are closed.';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists enforce_season_not_over on picks;
+create trigger enforce_season_not_over
+  before insert or update on picks
+  for each row execute function public.check_season_not_over();

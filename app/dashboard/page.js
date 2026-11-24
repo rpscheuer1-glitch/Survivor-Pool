@@ -7,6 +7,7 @@ import { useAuth } from "../../lib/useAuth";
 import { ineligible, pickProblem, describePickProblem, ruleLabel, computeStatus, MAX_ENTRIES_PER_ACCOUNT, isLocked, formatGameDate, formatLockLabel, computeAutoCurrentWeek } from "../../lib/poolLogic";
 import { abbr } from "../../lib/teams";
 import NotificationsCard from "../NotificationsCard";
+import SeasonOverBanner from "../SeasonOverBanner";
 
 function Pill({ tone = "gray", children }) {
   return <span className={`pill pill-${tone}`}>{children}</span>;
@@ -166,6 +167,7 @@ export default function Dashboard() {
               The playoff pool is open — go to your playoff entries →
             </Link>
           )}
+          {settings.season_over && <SeasonOverBanner message={settings.season_over_message} />}
           <NotificationsCard />
           <div className="grid gap-2 mb-4">
             {entries.length === 0 && <p className="text-chalk/60 text-sm">No entries yet.</p>}
@@ -218,7 +220,7 @@ export default function Dashboard() {
             })}
           </div>
 
-          {settings.signups_locked ? (
+          {settings.season_over ? null : settings.signups_locked ? (
             <p className="text-xs text-chalk/50">New entries are closed for this pool.</p>
           ) : entries.length < MAX_ENTRIES_PER_ACCOUNT ? (
             addingEntry ? (
@@ -249,6 +251,7 @@ export default function Dashboard() {
           finalByWeek={finalByWeek}
           currentWeek={currentWeek}
           weekNums={weekNums}
+          seasonOver={!!settings.season_over}
           submitPick={submitPick}
           clearPick={clearPick}
           renameEntry={renameEntry}
@@ -259,9 +262,11 @@ export default function Dashboard() {
   );
 }
 
-function EntryDetail({ entry, picks, gamesByWeek, finalByWeek, currentWeek, weekNums, submitPick, clearPick, renameEntry, onBack }) {
+function EntryDetail({ entry, picks, gamesByWeek, finalByWeek, currentWeek, weekNums, seasonOver, submitPick, clearPick, renameEntry, onBack }) {
   const status = computeStatus(picks, gamesByWeek, finalByWeek);
-  const openWeeks = weekNums.filter((wk) => wk >= currentWeek && !finalByWeek[wk] && (gamesByWeek[wk] || []).length > 0);
+  const openWeeks = seasonOver
+    ? []
+    : weekNums.filter((wk) => wk >= currentWeek && !finalByWeek[wk] && (gamesByWeek[wk] || []).length > 0);
 
   const [stagedPicks, setStagedPicks] = useState({});
   const [justSavedWeek, setJustSavedWeek] = useState(null);
@@ -394,7 +399,9 @@ function EntryDetail({ entry, picks, gamesByWeek, finalByWeek, currentWeek, week
       </div>
 
       {!status.eliminated && openWeeks.length === 0 && (
-        <p className="text-sm text-chalk/50 mb-6">No weeks are currently open for picks.</p>
+        <p className="text-sm text-chalk/50 mb-6">
+          {seasonOver ? "The season is over, so picks are closed." : "No weeks are currently open for picks."}
+        </p>
       )}
 
       {!status.eliminated && openWeeks.length > 0 && (() => {

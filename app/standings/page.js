@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
-import { fetchAllRows } from "../../lib/supabaseClient";
+import { supabase, fetchAllRows } from "../../lib/supabaseClient";
+import SeasonOverBanner from "../SeasonOverBanner";
 import { computeStatus, isLocked, computeAutoCurrentWeek, weekFullyLocked } from "../../lib/poolLogic";
 import { abbr } from "../../lib/teams";
 
@@ -10,6 +11,7 @@ function Pill({ tone = "gray", children }) {
 
 export default function Standings() {
   const [weekly, setWeekly] = useState([]);
+  const [seasonOver, setSeasonOver] = useState(null); // { message } once the admin ends the season
   const [totalEntries, setTotalEntries] = useState(0);
   const [aliveCount, setAliveCount] = useState(0);
   const [eliminatedCount, setEliminatedCount] = useState(0);
@@ -20,6 +22,8 @@ export default function Standings() {
     (async () => {
       // Names only (no emails) and only picks whose game has locked -- the database
       // enforces this, so nothing hidden is ever downloaded to the browser.
+      const { data: poolSettings } = await supabase.from("pool_settings").select("*").eq("id", 1).maybeSingle();
+      if (poolSettings?.season_over) setSeasonOver({ message: poolSettings.season_over_message });
       const entries = await fetchAllRows("public_entries", "*", "id");
       const gameRows = await fetchAllRows("games", "*", "created_at");
       const weekRows = await fetchAllRows("weeks", "*", "week");
@@ -140,6 +144,7 @@ export default function Standings() {
 
   return (
     <div className="grid gap-4">
+      {seasonOver && <SeasonOverBanner message={seasonOver.message} />}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         <div className="border border-turfline rounded-lg px-4 py-3">
           <div className="text-xs text-chalk/50 uppercase tracking-wide mb-1">Survivors</div>

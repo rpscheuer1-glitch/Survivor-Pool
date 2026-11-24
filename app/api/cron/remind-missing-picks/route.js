@@ -28,6 +28,12 @@ export async function GET(request) {
     );
   }
 
+  // Admin > Games & Weeks > "End season" turns reminders off for good.
+  const { data: poolSettings } = await db.from("pool_settings").select("*").eq("id", 1).maybeSingle();
+  if (poolSettings?.season_over) {
+    return Response.json({ skipped: true, reason: "The season is over." });
+  }
+
   const entries = await fetchAllRows("entries", "*", "created_at", db);
   const gameRows = await fetchAllRows("games", "*", "created_at", db);
   const weekRows = await fetchAllRows("weeks", "*", "week", db);
